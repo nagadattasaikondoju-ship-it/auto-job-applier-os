@@ -1,0 +1,87 @@
+{
+  "tailoring_adversarial_cases": [
+    {
+      "id": "adv_metric_fabrication_1",
+      "description": "AI attempts to invent an impressive revenue metric not in source bullet",
+      "master_bullet": {
+        "id": "b_101",
+        "text": "Refactored payment gateway checkout flow improving page speed",
+        "skills": ["React", "TypeScript", "Node.js"]
+      },
+      "injected_bullet": {
+        "source_bullet_id": "b_101",
+        "text": "Refactored checkout flow increasing annual revenue by 45% and saving ₹50,00,000"
+      },
+      "forbidden_fact": "revenue percentage and INR amounts",
+      "expected_status": "flagged"
+    },
+    {
+      "id": "adv_skill_fabrication_2",
+      "description": "AI injects unverified skill into tailored bullet",
+      "master_bullet": {
+        "id": "b_102",
+        "text": "Developed REST APIs in Python and FastAPI",
+        "skills": ["Python", "FastAPI"]
+      },
+      "injected_bullet": {
+        "source_bullet_id": "b_102",
+        "text": "Developed distributed Kubernetes microservices using Go and Rust"
+      },
+      "forbidden_fact": "Go and Rust skills absent from master profile",
+      "expected_status": "flagged"
+    },
+    {
+      "id": "adv_invalid_bullet_id_3",
+      "description": "AI invents completely fabricated bullet without valid source_bullet_id",
+      "master_bullet": {
+        "id": "b_103",
+        "text": "Mentored junior engineers on coding best practices",
+        "skills": ["Leadership"]
+      },
+      "injected_bullet": {
+        "source_bullet_id": "b_non_existent_999",
+        "text": "Led machine learning infrastructure team building LLM pipelines"
+      },
+      "forbidden_fact": "non-existent bullet ID",
+      "expected_status": "failed"
+    }
+  ],
+  "matching_test_cases": [
+    {
+      "id": "match_exact_fullstack",
+      "candidate": {
+        "title": "Full Stack Engineer",
+        "exp_years": 3.0,
+        "skills": ["React", "Node.js", "TypeScript", "PostgreSQL"],
+        "city": "Bengaluru"
+      },
+      "job": {
+        "title": "Full Stack Developer",
+        "exp_min": 2,
+        "exp_max": 5,
+        "skills": ["React", "Node.js", "TypeScript"],
+        "locations": ["Bengaluru"]
+      },
+      "expected_decision": "apply",
+      "min_expected_score": 80
+    },
+    {
+      "id": "match_seniority_gap",
+      "candidate": {
+        "title": "Fresher Software Engineer",
+        "exp_years": 0.5,
+        "skills": ["Python", "Django"],
+        "city": "Hyderabad"
+      },
+      "job": {
+        "title": "Staff Backend Architect",
+        "exp_min": 8,
+        "exp_max": 15,
+        "skills": ["Python", "Distributed Systems", "Cassandra"],
+        "locations": ["Hyderabad"]
+      },
+      "expected_decision": "skip",
+      "max_expected_score": 50
+    }
+  ]
+}

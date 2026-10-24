@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Applyon — AI Job Application Copilot",
+  "version": "1.0.0",
+  "description": "Autofill Indian and global ATS job applications with verified, tailored answers and resume matching.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Applyon Copilot"
+  }
+}

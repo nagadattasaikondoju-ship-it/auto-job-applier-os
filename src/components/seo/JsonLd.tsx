@@ -98,7 +98,9 @@ export function JsonLd() {
 
   return (
     <script
+      id="applyon-ld-json"
       type="application/ld+json"
+      suppressHydrationWarning
       dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaGraph) }}
     />
   );

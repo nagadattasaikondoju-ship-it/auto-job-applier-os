@@ -1,0 +1,189 @@
+{
+  "version": "v1",
+  "sections": [
+    {
+      "id": "career_goal",
+      "title": "Career Goals",
+      "description": "Define the roles and career trajectory you want Applyon to target.",
+      "questions": [
+        {
+          "id": "target_roles",
+          "canonical_key": "target_roles",
+          "text": "What job titles or roles are you actively looking for?",
+          "type": "multi_select",
+          "options": [
+            "Software Engineer",
+            "Full Stack Developer",
+            "Frontend Engineer",
+            "Backend Engineer",
+            "AI / Machine Learning Engineer",
+            "Data Scientist",
+            "Data Engineer",
+            "DevOps Engineer / SRE",
+            "Product Manager",
+            "QA / Automation Engineer"
+          ],
+          "required": true,
+          "target_table": "job_preferences",
+          "target_field": "target_roles"
+        },
+        {
+          "id": "seniority",
+          "canonical_key": "seniority",
+          "text": "What is your target seniority level?",
+          "type": "choice",
+          "options": ["intern", "fresher", "junior", "mid", "senior", "lead"],
+          "required": true,
+          "target_table": "job_preferences",
+          "target_field": "seniority"
+        }
+      ]
+    },
+    {
+      "id": "logistics_india",
+      "title": "Logistics & Compensation",
+      "description": "Critical logistics details required by Indian employers and HRMS platforms.",
+      "questions": [
+        {
+          "id": "current_city",
+          "canonical_key": "city",
+          "text": "Which city do you currently live in?",
+          "type": "text",
+          "required": true,
+          "target_table": "profiles",
+          "target_field": "city"
+        },
+        {
+          "id": "preferred_cities",
+          "canonical_key": "locations",
+          "text": "Which cities are you willing to work in?",
+          "type": "multi_select",
+          "options": [
+            "Bengaluru",
+            "Hyderabad",
+            "Mumbai",
+            "Delhi NCR",
+            "Pune",
+            "Chennai",
+            "Kolkata",
+            "Ahmedabad",
+            "Remote"
+          ],
+          "required": true,
+          "target_table": "job_preferences",
+          "target_field": "locations"
+        },
+        {
+          "id": "remote_mode",
+          "canonical_key": "remote_mode",
+          "text": "What work arrangements are acceptable to you?",
+          "type": "multi_select",
+          "options": ["remote", "hybrid", "onsite"],
+          "required": true,
+          "target_table": "job_preferences",
+          "target_field": "remote_mode"
+        },
+        {
+          "id": "notice_period_days",
+          "canonical_key": "notice_period_days",
+          "text": "What is your notice period (in days)?",
+          "type": "number",
+          "required": true,
+          "default": 30,
+          "target_table": "profiles",
+          "target_field": "notice_period_days"
+        },
+        {
+          "id": "currently_serving_notice",
+          "canonical_key": "currently_serving_notice",
+          "text": "Are you currently serving your notice period?",
+          "type": "boolean",
+          "required": true,
+          "target_table": "profiles",
+          "target_field": "currently_serving_notice"
+        },
+        {
+          "id": "current_ctc_lpa",
+          "canonical_key": "current_ctc_lpa",
+          "text": "What is your current fixed annual compensation (in LPA)?",
+          "type": "number",
+          "required": false,
+          "target_table": "profiles",
+          "target_field": "current_ctc_lpa"
+        },
+        {
+          "id": "expected_ctc_lpa",
+          "canonical_key": "expected_ctc_lpa",
+          "text": "What is your expected annual compensation (in LPA)?",
+          "type": "number",
+          "required": true,
+          "target_table": "profiles",
+          "target_field": "expected_ctc_lpa"
+        }
+      ]
+    },
+    {
+      "id": "standard_answers",
+      "title": "Standard Application Form Answers",
+      "description": "Pre-filled answers to avoid AI calls during form applications.",
+      "questions": [
+        {
+          "id": "work_authorization_india",
+          "canonical_key": "work_authorization_india",
+          "text": "Are you legally authorized to work in India?",
+          "type": "boolean",
+          "required": true,
+          "default": true,
+          "target_table": "answer_bank",
+          "target_field": "work_authorization_india"
+        },
+        {
+          "id": "visa_sponsorship_needed",
+          "canonical_key": "visa_sponsorship_needed",
+          "text": "Do you now or in the future require visa sponsorship?",
+          "type": "boolean",
+          "required": true,
+          "default": false,
+          "target_table": "job_preferences",
+          "target_field": "visa_sponsorship_needed"
+        },
+        {
+          "id": "how_did_you_hear",
+          "canonical_key": "how_did_you_hear",
+          "text": "How did you hear about open roles?",
+          "type": "choice",
+          "options": ["Company website", "LinkedIn", "Job Board", "Referral"],
+          "default": "Company website",
+          "required": true,
+          "target_table": "answer_bank",
+          "target_field": "how_did_you_hear"
+        }
+      ]
+    },
+    {
+      "id": "story_answers",
+      "title": "Behavioral & Story Questions",
+      "description": "Core narrative answers used to power tailored screening answers.",
+      "questions": [
+        {
+          "id": "tell_us_about_yourself",
+          "canonical_key": "tell_us_about_yourself",
+          "text": "Briefly tell us about your professional background and passions.",
+          "type": "long_text",
+          "required": true,
+          "target_table": "answer_bank",
+          "target_field": "tell_us_about_yourself"
+        },
+        {
+          "id": "biggest_achievement",
+          "canonical_key": "biggest_achievement",
+          "text": "What is your greatest technical or professional achievement?",
+          "type": "long_text",
+          "required": false,
+          "target_table": "answer_bank",
+          "target_field": "biggest_achievement"
+        }
+      ]
+    }
+  ]
+}

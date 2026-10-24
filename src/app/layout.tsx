@@ -95,10 +95,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en-IN" suppressHydrationWarning>
-      <head>
+      <body
+        suppressHydrationWarning
+        className="antialiased selection:bg-indigo-500/20 selection:text-indigo-600 font-body"
+      >
         <JsonLd />
-      </head>
-      <body className="antialiased selection:bg-indigo-500/20 selection:text-indigo-600 font-body">
         {children}
       </body>
     </html>
