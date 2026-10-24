@@ -69,7 +69,12 @@ async def approve_application(
         actor="user",
         notes="Candidate approved application in review queue",
     )
-    return {"id": str(app_obj.id), "status": app_obj.status, "approved": True}
+    # Approved applications go to a browser worker for submission. Without workers running,
+    # they stay "approved" and the user can finish them with the Chrome extension.
+    from apps.workers.dispatch import enqueue_browser_submission
+
+    queued = enqueue_browser_submission(str(app_obj.id))
+    return {"id": str(app_obj.id), "status": app_obj.status, "approved": True, "submission_queued": queued}
 
 
 @router.post("/applications/{application_id}/reject")

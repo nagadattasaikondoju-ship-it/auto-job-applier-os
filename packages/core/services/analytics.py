@@ -78,8 +78,8 @@ class AnalyticsService:
             "status_distribution": status_counts,
             "credits": {
                 "available_balance": balance,
-                "daily_remaining": cap_info.get("remaining", 0),
-                "daily_limit": cap_info.get("limit", 10),
+                "daily_remaining": cap_info.get("remaining_today", 0),
+                "daily_limit": cap_info.get("daily_limit", 10),
             },
             "ai_usage": {
                 "tokens_in": int(ai_in),

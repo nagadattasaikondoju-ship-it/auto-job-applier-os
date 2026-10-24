@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -115,6 +115,7 @@ async def _async_execute_browser_application(
                 )
             application.status = "submitted"
             application.submitted_at = datetime.now(UTC)
+            application.follow_up_at = datetime.now(UTC) + timedelta(days=6)
             session.add(
                 ApplicationEvent(
                     application_id=application.id,
@@ -158,18 +159,20 @@ async def _async_execute_browser_application(
 
 
 async def _async_autopilot_tick() -> dict[str, Any]:
-    """Inspect active campaigns and trigger autopilot cycles."""
-    executed = 0
+    """Prepare a few applications per active campaign (each user in their own session)."""
     async with async_session_maker() as session:
-        camp_res = await session.execute(select(Campaign).where(Campaign.status == "active"))
-        active_campaigns = camp_res.scalars().all()
-
-        for c in active_campaigns:
-            res = await AutopilotService.execute_autopilot_cycle(
-                db=session, user_id=c.user_id, dry_run=False
-            )
-            if res.get("success"):
-                executed += 1
+        user_ids = list(
+            (await session.execute(select(Campaign.user_id).where(Campaign.status == "active"))).scalars().all()
+        )
+    executed = 0
+    for uid in user_ids:
+        try:
+            async with async_session_maker() as session:
+                res = await AutopilotService.run_batch(db=session, user_id=uid, max_items=3)
+                executed += res["prepared"]
+        except Exception as e:  # one user's failure must not stop the others
+            logger.warning("Autopilot tick failed for %s: %s", uid, e)
+    active_campaigns = user_ids
 
     return {"active_campaigns": len(active_campaigns), "executed_cycles": executed}
 

@@ -2,7 +2,6 @@
 
 import json
 import logging
-import uuid
 from typing import Literal
 
 from sqlalchemy import and_, not_, or_, select
@@ -22,7 +21,7 @@ logger = logging.getLogger("applyon.matching")
 
 async def run_matching_funnel_for_user(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    user_id: str,
     top_k: int = 30,
 ) -> list[JobMatch]:
     """Execute the multi-stage matching funnel for a user."""

@@ -19,6 +19,19 @@ class ConsentPayload(BaseModel):
     granted: bool = True
 
 
+@router.get("")
+async def get_consents(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Current state of each DPDP consent purpose."""
+    from packages.core.services.autopilot import active_consents
+
+    state = await active_consents(db, current_user.user_id)
+    purposes = ["profile_matching", "document_generation", "auto_submit"]
+    return {"consents": {p: state.get(p, False) for p in purposes}}
+
+
 @router.post("")
 async def grant_consent(
     payload: ConsentPayload,

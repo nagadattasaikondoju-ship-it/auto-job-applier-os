@@ -1,7 +1,6 @@
 """Celery tasks for job board crawling, ingestion, and matching."""
 
 import logging
-import uuid
 from typing import Any
 
 from apps.workers.celery_app import celery_app
@@ -92,9 +91,8 @@ async def _async_crawl_adzuna(keywords: str, city: str) -> dict[str, Any]:
 
 
 async def _async_match_user_jobs(user_id_str: str) -> dict[str, Any]:
-    user_id = uuid.UUID(user_id_str)
     async with async_session_maker() as session:
-        matches = await run_matching_funnel_for_user(session=session, user_id=user_id)
+        matches = await run_matching_funnel_for_user(session=session, user_id=user_id_str)
         return {"user_id": user_id_str, "matches_count": len(matches)}
 
 
@@ -121,3 +119,24 @@ def crawl_adzuna_feed(keywords: str, city: str) -> dict[str, Any]:
 @celery_app.task(name="jobs.match_user", queue="ai_matching")
 def match_user_jobs(user_id: str) -> dict[str, Any]:
     return run_async(_async_match_user_jobs(user_id_str=user_id))
+
+
+@celery_app.task(name="jobs.discover_all", queue="job_ingestion")
+def discover_all_jobs() -> dict[str, Any]:
+    """Scheduled: crawl due company boards and Adzuna for every user's roles and cities."""
+    from packages.core.services.discovery import crawl_adzuna_for_preferences, crawl_due_companies
+
+    async def _run() -> dict[str, Any]:
+        boards = await crawl_due_companies(limit=50)
+        adzuna = await crawl_adzuna_for_preferences(max_pairs=40)
+        return {**boards, **adzuna}
+
+    return run_async(_run())
+
+
+@celery_app.task(name="jobs.match_all_users", queue="ai_matching")
+def match_all_users() -> dict[str, Any]:
+    """Scheduled: re-run matching for every user with preferences."""
+    from packages.core.services.discovery import match_users
+
+    return run_async(match_users())

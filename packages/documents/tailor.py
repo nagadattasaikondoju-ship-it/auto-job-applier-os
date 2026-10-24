@@ -17,14 +17,25 @@ from packages.core.models.jobs import Company, Job
 from packages.core.models.matching import CoverLetter, JobMatch, ResumeVersion
 from packages.core.models.profile import Profile, ProfileVersion
 from packages.core.services.profile import create_profile_snapshot_for_user
-from packages.documents.renderer import generate_resume_filename, render_html, render_pdf
+from packages.documents.export import (
+    build_resume_document,
+    cover_letter_pdf_bytes,
+    resume_pdf_bytes,
+)
+from packages.documents.renderer import generate_resume_filename
+
+TONE_GUIDE = {
+    "professional": "Professional and warm. Clear, confident sentences.",
+    "friendly": "Friendly and conversational, still polished. Shows genuine enthusiasm.",
+    "direct": "Direct and concise. Short paragraphs, lead with impact, no filler.",
+}
 
 logger = logging.getLogger("applyon.documents.tailor")
 
 
 async def tailor_resume_for_job(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    user_id: str,
     job_id: uuid.UUID,
 ) -> tuple[ResumeVersion, str]:
     """Tailor candidate resume specifically for a job with deterministic truth verification.
@@ -94,13 +105,8 @@ Tailor the summary, experiences, and skills for this role without adding any unv
         profile_snapshot=snapshot_json,
     )
 
-    # 5. Render HTML and PDF
-    context = {
-        "profile": snapshot_json,
-        "tailored": tailored.model_dump(),
-    }
-    rendered_html = render_html("classic_ats.html", context)
-    pdf_bytes = render_pdf(rendered_html)
+    # 5. Render an ATS-friendly PDF (single column, real text)
+    pdf_bytes = resume_pdf_bytes(build_resume_document(snapshot_json, tailored.model_dump()))
 
     # 6. Save PDF artifact
     storage_dir = Path("artifacts") / "documents" / str(user_id) / str(job_id)
@@ -138,10 +144,11 @@ Tailor the summary, experiences, and skills for this role without adding any unv
 
 async def generate_cover_letter(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    user_id: str,
     job_id: uuid.UUID,
+    tone: str = "professional",
 ) -> CoverLetter:
-    """Generate role- and company-specific cover letter (under 300 words)."""
+    """Generate role- and company-specific cover letter (under 300 words) in the chosen tone."""
     prof_stmt = select(Profile).where(Profile.user_id == user_id)
     profile = (await session.execute(prof_stmt)).scalar_one_or_none()
     if not profile:
@@ -165,7 +172,9 @@ Target Role: {job.title}
 Key Job Requirements: {job.description_text[:600]}
 Candidate Summary & Experience: {profile.summary}
 
-Keep tone authentic, direct, and free of corporate clichés.
+Tone: {TONE_GUIDE.get(tone, TONE_GUIDE["professional"])}
+Open with what the company is trying to achieve in this role, then connect it to the candidate's
+real achievements. Use only facts from the candidate's profile. No corporate clichés.
 """
     cl_output: CoverLetterOutput = await gemini_client.generate_structured(
         model_name=settings.gemini_model_smart,
@@ -199,8 +208,11 @@ Keep tone authentic, direct, and free of corporate clichés.
         "date_str": datetime.utcnow().strftime("%B %d, %Y"),
         "cover_letter_body": cl_output.cover_letter_text,
     }
-    rendered_html = render_html("cover_letter.html", context)
-    pdf_bytes = render_pdf(rendered_html)
+    pdf_bytes = cover_letter_pdf_bytes(
+        profile.full_name,
+        [x for x in [profile.email, profile.phone, profile.city] if x],
+        str(context["cover_letter_body"]),
+    )
 
     storage_dir = Path("artifacts") / "documents" / str(user_id) / str(job_id)
     storage_dir.mkdir(parents=True, exist_ok=True)

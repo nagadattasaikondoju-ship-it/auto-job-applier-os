@@ -116,3 +116,13 @@ class SingleScreeningAnswer(BaseModel):
 
 class ScreeningAnswersOutput(BaseModel):
     answers: list[SingleScreeningAnswer]
+
+
+class BulletRewrite(BaseModel):
+    bullet_id: str
+    rewritten: str = Field(..., description="Stronger version using ONLY facts present in the original bullet")
+    reason: str = Field(..., description="Short explanation of what was improved")
+
+
+class BulletRewriteOutput(BaseModel):
+    rewrites: list[BulletRewrite]

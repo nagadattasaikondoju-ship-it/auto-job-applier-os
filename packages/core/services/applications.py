@@ -3,7 +3,7 @@
 import contextlib
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
@@ -11,7 +11,8 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.core.models.applications import Application, ApplicationEvent
-from packages.core.models.jobs import Job
+from packages.core.models.jobs import Company, Job
+from packages.core.models.matching import JobMatch
 from packages.core.models.preferences import AnswerBank, AnswerEdit
 from packages.core.models.profile import Profile
 from packages.core.services.answer_resolver import (
@@ -101,7 +102,8 @@ class ApplicationsService:
             user_id=user_id, profile=profile, job=job, fields=fields
         )
 
-        initial_status = "ready_for_review" if plan.unresolved_count > 0 else "approved"
+        # Every application waits for the user's approval; autopilot decides separately for hybrid mode.
+        initial_status = "ready_for_review"
 
         app_obj = Application(
             id=uuid.uuid4(),
@@ -140,62 +142,56 @@ class ApplicationsService:
         page: int = 1,
         page_size: int = 20,
     ) -> dict[str, Any]:
-        """List user applications with job details and pagination."""
+        """List user applications with job, company and match details, paginated."""
         query = (
-            select(Application, Job)
+            select(Application, Job, Company.name, JobMatch.match_score)
             .join(Job, Application.job_id == Job.id)
+            .join(Company, Job.company_id == Company.id)
+            .outerjoin(JobMatch, (JobMatch.job_id == Job.id) & (JobMatch.user_id == Application.user_id))
             .where(Application.user_id == user_id)
         )
 
         if status:
-            query = query.where(Application.status == status)
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            query = query.where(Application.status.in_(statuses))
 
         if search:
             search_pat = f"%{search}%"
-            query = query.where(
-                or_(
-                    Job.title.ilike(search_pat),
-                    Job.company_name.ilike(search_pat),
-                )
-            )
+            query = query.where(or_(Job.title.ilike(search_pat), Company.name.ilike(search_pat)))
 
-        # Count total
         count_q = select(func.count()).select_from(query.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
 
-        # Paginate
-        query = query.order_by(desc(Application.created_at))
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.order_by(desc(Application.updated_at)).offset((page - 1) * page_size).limit(page_size)
         results = (await self.db.execute(query)).all()
 
-        items = []
-        for app_obj, job_obj in results:
-            company_title = getattr(job_obj, "company_name", None)
-            if not company_title and getattr(job_obj, "company", None):
-                company_title = job_obj.company.name
-            loc = job_obj.locations[0] if getattr(job_obj, "locations", None) else getattr(job_obj, "location_city", "India")
-            items.append(
-                {
-                    "id": str(app_obj.id),
-                    "job_id": str(job_obj.id),
-                    "job_title": job_obj.title,
-                    "company_name": company_title or "Company",
-                    "location": loc,
-                    "salary_min_lpa": getattr(job_obj, "salary_min_lpa", None),
-                    "salary_max_lpa": getattr(job_obj, "salary_max_lpa", None),
-                    "status": app_obj.status,
-                    "channel": app_obj.channel,
-                    "application_url": app_obj.application_url,
-                    "submitted_at": app_obj.submitted_at.isoformat() if app_obj.submitted_at else None,
-                    "created_at": app_obj.created_at.isoformat(),
-                }
-            )
+        items = [
+            self._list_item(app_obj, job_obj, company_name, match_score)
+            for app_obj, job_obj, company_name, match_score in results
+        ]
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
 
+    @staticmethod
+    def _list_item(app_obj: Application, job_obj: Job, company_name: str | None, match_score: int | None) -> dict[str, Any]:
+        loc = job_obj.locations[0] if job_obj.locations else (job_obj.location_raw or "India")
         return {
-            "items": items,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
+            "id": str(app_obj.id),
+            "job_id": str(job_obj.id),
+            "job_title": job_obj.title,
+            "company_name": company_name or "Company",
+            "location": loc,
+            "salary_min_lpa": job_obj.salary_min_lpa,
+            "salary_max_lpa": job_obj.salary_max_lpa,
+            "status": app_obj.status,
+            "channel": app_obj.channel,
+            "source": job_obj.source,
+            "match_score": match_score,
+            "resume_version_id": str(app_obj.resume_version_id) if app_obj.resume_version_id else None,
+            "application_url": app_obj.application_url,
+            "submitted_at": app_obj.submitted_at.isoformat() if app_obj.submitted_at else None,
+            "follow_up_at": app_obj.follow_up_at.isoformat() if app_obj.follow_up_at else None,
+            "created_at": app_obj.created_at.isoformat(),
+            "updated_at": app_obj.updated_at.isoformat() if app_obj.updated_at else None,
         }
 
     async def get_application_detail(
@@ -203,8 +199,9 @@ class ApplicationsService:
     ) -> dict[str, Any]:
         """Fetch complete application details including timeline events and resolved form."""
         stmt = (
-            select(Application, Job)
+            select(Application, Job, Company.name)
             .join(Job, Application.job_id == Job.id)
+            .join(Company, Job.company_id == Company.id)
             .where(Application.id == application_id, Application.user_id == user_id)
         )
         res = await self.db.execute(stmt)
@@ -212,7 +209,7 @@ class ApplicationsService:
         if not record:
             raise HTTPException(status_code=404, detail="Application not found")
 
-        app_obj, job_obj = record
+        app_obj, job_obj, company_name = record
 
         # Fetch events
         ev_stmt = (
@@ -236,10 +233,12 @@ class ApplicationsService:
             "submitted_at": app_obj.submitted_at.isoformat() if app_obj.submitted_at else None,
             "created_at": app_obj.created_at.isoformat(),
             "failure_reason": app_obj.failure_reason,
+            "follow_up_at": app_obj.follow_up_at.isoformat() if app_obj.follow_up_at else None,
+            "resume_version_id": str(app_obj.resume_version_id) if app_obj.resume_version_id else None,
             "job": {
                 "id": str(job_obj.id),
                 "title": job_obj.title,
-                "company_name": getattr(job_obj, "company_name", getattr(getattr(job_obj, "company", None), "name", "Company")),
+                "company_name": company_name or "Company",
                 "location_city": job_obj.locations[0] if getattr(job_obj, "locations", None) else getattr(job_obj, "location_city", "India"),
                 "is_remote": getattr(job_obj, "remote_mode", "onsite") in ("remote", "hybrid") or getattr(job_obj, "is_remote", False),
                 "ats_type": getattr(job_obj, "ats_type", "generic"),
@@ -287,6 +286,11 @@ class ApplicationsService:
             app_obj.failure_reason = failure_reason
         if new_status == "submitted" and not app_obj.submitted_at:
             app_obj.submitted_at = datetime.now(UTC)
+        if new_status == "submitted" and not app_obj.follow_up_at:
+            # Remind the user to follow up if they haven't heard back in about a week
+            app_obj.follow_up_at = datetime.now(UTC) + timedelta(days=6)
+        if new_status in ("interview", "offer", "rejected", "withdrawn", "ghosted"):
+            app_obj.follow_up_at = None
 
         event = ApplicationEvent(
             id=uuid.uuid4(),

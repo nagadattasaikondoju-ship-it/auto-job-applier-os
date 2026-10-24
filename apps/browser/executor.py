@@ -136,9 +136,21 @@ class BrowserAutomationExecutor:
 
                 await browser.close()
 
+                if not dry_run and not submitted:
+                    # Never report a submission we couldn't confirm: hand it to the user instead.
+                    return AutomationResult(
+                        success=False,
+                        status="needs_user_action",
+                        blocker_detected="submit_not_confirmed",
+                        error_message="Form was filled but submission could not be confirmed. Finish it in your browser.",
+                        fields_filled=filled_count,
+                        total_fields=len(fields),
+                        proof_screenshot_path=proof_path,
+                    )
+
                 return AutomationResult(
                     success=True,
-                    status="submitted" if submitted else ("ready_for_review" if dry_run else "submitted"),
+                    status="submitted" if submitted else "ready_for_review",
                     fields_filled=filled_count,
                     total_fields=len(fields),
                     proof_screenshot_path=proof_path,
@@ -150,11 +162,12 @@ class BrowserAutomationExecutor:
                 )
 
         except ImportError:
-            logger.warning("Playwright not installed, simulating execution safely.")
+            logger.warning("Playwright not installed: nothing was filled or submitted.")
             filled_count = sum(1 for f in fields if f.get("value") is not None)
+            # Without a browser nothing was sent, so the application always goes to review.
             return AutomationResult(
                 success=True,
-                status="ready_for_review" if dry_run else "submitted",
+                status="ready_for_review",
                 fields_filled=filled_count,
                 total_fields=len(fields),
                 proof_screenshot_path=f"storage/artifacts/{application_id}_proof.png",

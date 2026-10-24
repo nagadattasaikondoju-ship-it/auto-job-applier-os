@@ -1,9 +1,9 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
@@ -11,12 +11,19 @@ from apps.api.deps.db import get_db
 from packages.ai.client import gemini_client
 from packages.ai.schemas import ParsedResumeOutput
 from packages.core.config import settings
+from packages.core.models.preferences import JobPreference
 from packages.core.models.profile import (
     Education,
     Experience,
     Profile,
     Resume,
     Skill,
+)
+from packages.core.services.ats import (
+    UnsupportedFileError,
+    analyze_resume,
+    extract_text,
+    heuristic_parse,
 )
 from packages.core.services.profile import create_profile_version
 
@@ -28,45 +35,109 @@ class ResumeTextPayload(BaseModel):
     filename: str = "resume.txt"
 
 
-@router.post("")
-async def upload_and_parse_resume(
-    payload: ResumeTextPayload,
-    current_user: AuthenticatedUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Upload resume text or document, parse using Gemini into structured schema, and store."""
-    resume_id = uuid.uuid4()
-
-    # Call Gemini to parse resume text into structured schema
+async def _parse_resume_text(raw_text: str) -> dict[str, Any]:
+    """AI parse when a Gemini key is configured; otherwise a rule-based parse of the real text."""
+    if not gemini_client.api_key or gemini_client.api_key.startswith(("mock-", "test-")):
+        return heuristic_parse(raw_text)
     parsed_output = await gemini_client.generate_structured(
         model_name=settings.gemini_model_smart,
         system_instruction=(
             "You are an expert resume parser for Indian and international tech talent. "
             "Extract candidate personal info, categorized skills, and work experiences with quantifiable metrics. "
+            "Give every experience bullet a unique id (b1, b2, ...). "
             "Do NOT hallucinate facts not present in the text."
         ),
-        prompt=payload.raw_text,
+        prompt=raw_text,
         response_model=ParsedResumeOutput,
         prompt_version="v1",
     )
+    return parsed_output.model_dump()
 
+
+async def _store_parsed_resume(
+    db: AsyncSession, user_id: str, raw_text: str, filename: str
+) -> dict[str, Any]:
+    parsed = await _parse_resume_text(raw_text)
+    resume_id = uuid.uuid4()
+    # Earlier uploads stop being the master resume
+    for old in (await db.execute(select(Resume).where(Resume.user_id == user_id))).scalars().all():
+        old.is_master = False
     resume = Resume(
         id=resume_id,
-        user_id=current_user.user_id,
-        file_path=f"resumes/{current_user.user_id}/{resume_id}/{payload.filename}",
-        filename=payload.filename,
-        raw_text=payload.raw_text,
-        parsed_json=parsed_output.model_dump(),
+        user_id=user_id,
+        file_path=f"resumes/{user_id}/{resume_id}/{filename}",
+        filename=filename,
+        raw_text=raw_text,
+        parsed_json=parsed,
         parse_status="succeeded",
         is_master=True,
     )
     db.add(resume)
     await db.commit()
 
+    pref = (await db.execute(select(JobPreference).where(JobPreference.user_id == user_id))).scalar_one_or_none()
+    report = analyze_resume(raw_text, target_roles=pref.target_roles if pref else [])
+    return {"id": str(resume.id), "status": "succeeded", "parsed_profile": parsed, "ats": report}
+
+
+@router.post("")
+async def upload_and_parse_resume(
+    payload: ResumeTextPayload,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Parse pasted resume text into the structured profile schema and run an ATS scan."""
+    if len(payload.raw_text.strip()) < 100:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "RESUME_TOO_SHORT", "message": "Paste your full resume text (at least 100 characters)."},
+        )
+    return await _store_parsed_resume(db, current_user.user_id, payload.raw_text, payload.filename)
+
+
+@router.post("/upload")
+async def upload_resume_file(
+    file: UploadFile = File(...),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Upload a PDF, DOCX or text resume, extract its text on the server, parse it and scan it."""
+    data = await file.read()
+    try:
+        raw_text = extract_text(file.filename or "resume.pdf", data)
+    except UnsupportedFileError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "UNSUPPORTED_RESUME", "message": str(e)},
+        ) from e
+    return await _store_parsed_resume(db, current_user.user_id, raw_text, file.filename or "resume")
+
+
+@router.get("/master")
+async def get_master_resume(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """The most recent uploaded resume (text and parse), if any."""
+    resume = (
+        await db.execute(
+            select(Resume)
+            .where(Resume.user_id == current_user.user_id)
+            .order_by(Resume.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if not resume:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESUME_NOT_FOUND", "message": "No resume uploaded yet."},
+        )
     return {
         "id": str(resume.id),
-        "status": "succeeded",
-        "parsed_profile": resume.parsed_json,
+        "filename": resume.filename,
+        "parse_status": resume.parse_status,
+        "parsed_json": resume.parsed_json,
+        "created_at": resume.created_at.isoformat() if resume.created_at else None,
     }
 
 
@@ -140,6 +211,10 @@ async def confirm_resume_profile(
         profile.phone = data.get("phone", profile.phone)
         profile.city = data.get("city", profile.city)
         profile.summary = data.get("summary", profile.summary)
+
+    # Confirming a resume replaces the previous resume-derived sections instead of duplicating them
+    for model in (Experience, Education, Skill):
+        await db.execute(delete(model).where(model.user_id == current_user.user_id))
 
     # 2. Add Experiences
     created_experiences = []

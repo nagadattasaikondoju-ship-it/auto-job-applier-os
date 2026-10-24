@@ -258,7 +258,7 @@ async def test_applications_lifecycle_and_review_queue():
 
     # Step 2: Detail lookup
     res_detail = MagicMock()
-    res_detail.first.return_value = (app_obj, job)
+    res_detail.first.return_value = (app_obj, job, "Razorpay")
     res_events = MagicMock()
     event = ApplicationEvent(
         id=uuid.uuid4(),
