@@ -75,6 +75,12 @@ export function Navbar({ onOpenWaitlist }: NavbarProps) {
 
         {/* Right: CTA Button */}
         <div className="hidden sm:flex items-center gap-3">
+          <Link
+            href="/login"
+            className="rounded-full px-4 py-2 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors"
+          >
+            Log in
+          </Link>
           <a
             href="#hero"
             onClick={(e) => {
@@ -122,6 +128,12 @@ export function Navbar({ onOpenWaitlist }: NavbarProps) {
               {link.label}
             </a>
           ))}
+          <Link
+            href="/login"
+            className="text-base font-medium text-foreground/80 hover:text-foreground py-2 border-b border-border/30"
+          >
+            Log in
+          </Link>
           <a
             href="#hero"
             onClick={() => setMobileMenuOpen(false)}
