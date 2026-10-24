@@ -6,14 +6,19 @@ The landing page lives at `/` (plus the SEO pages). The logged-in product lives 
 src/app/
   (auth)/login, (auth)/signup          Firebase login (or local dev login)
   (app)/layout.tsx                     Providers + RequireAuth + DynamicMarker
-  (app)/onboarding                     Resume → questionnaire → DPDP consent
+  (app)/onboarding                     Upload resume → check parsed profile → ATS score + fixes
+                                       → 7-question preferences → DPDP consent → start auto-apply
   (app)/(shell)/layout.tsx             Sidebar + top bar (AppShell)
-  (app)/(shell)/dashboard              Stats, top matches, review count, funnel
-  (app)/(shell)/jobs                   Matched job feed, import a job
+  (app)/(shell)/dashboard              Getting-started checklist, stats, top matches, funnel
+  (app)/(shell)/resume                 Resume & ATS: upload, score, bullet rewrites, versions, PDF/DOCX
+  (app)/(shell)/preferences            Roles, cities, level, salary, notice, exclusions, apply mode
+  (app)/(shell)/auto-apply             Start/pause, Review vs Hybrid, daily limit, live progress
+  (app)/(shell)/follow-ups             Due follow-ups with editable email drafts
+  (app)/(shell)/jobs                   Matched job feed, saved jobs, "Find jobs now", import a job
   (app)/(shell)/jobs/[id]              Job detail + fit analysis + feedback
   (app)/(shell)/jobs/[id]/tailor       Tailored resume + cover letter + truth check
   (app)/(shell)/review                 Review queue: edit answers, approve/skip
-  (app)/(shell)/applications           Tracker (table on desktop, cards on mobile)
+  (app)/(shell)/applications           Kanban tracker (drag between stages) + table + CSV export
   (app)/(shell)/applications/[id]      Answers, status updates, timeline
   (app)/(shell)/answers                Answer bank
   (app)/(shell)/profile                Master profile editor
@@ -26,7 +31,6 @@ src/lib/api/client.ts     fetch wrapper: base URL, bearer token, error parsing
 src/lib/api/endpoints.ts  `api.*` — the ONLY place pages talk to the backend
 src/lib/auth.tsx          AuthProvider (Firebase, or dev token when Firebase isn't configured)
 src/lib/firebase.ts       Firebase web SDK init from NEXT_PUBLIC_FIREBASE_*
-src/lib/pdf-text.ts       Reads PDF/.txt resumes in the browser (pdfjs-dist)
 src/lib/format.ts         Salary, dates, status labels/tones
 src/components/app/ui.tsx Buttons, cards, badges, inputs, dialog, tabs, score ring…
 ```
@@ -50,15 +54,28 @@ npm run dev                     # http://localhost:3000 → /login
 
 Backend: `docker compose -f infra/docker-compose.yml up` (or uvicorn) with `APP_ENV=development`. With Firebase unset, the login page offers "Continue as dev user", which sends `dev-token-<uid>`.
 
-## Known gaps (backend endpoints the UI needs next)
+## How auto-apply works (end to end)
 
-| Gap | Effect today | Needed endpoint |
+1. **Discovery** (Celery beat, hourly; or "Find jobs now"): Greenhouse/Lever/Ashby boards from
+   `infra/seed/companies_india.csv` plus Adzuna searches for each user's roles and cities.
+2. **Matching** (every 30 min, and right after "Start auto-apply"): hard filters on title, city/remote,
+   experience and exclusions → rule-based skill/title score → Gemini scores the top 8 (rules if AI is down).
+3. **Preparing** (every 15 min): for matches above the user's minimum score, the form is read from the
+   ATS, answers come from the profile, then the answer bank, then AI. Each application waits in the
+   Review queue; only required questions must be answered.
+4. **Submitting**: on Approve (or Hybrid at 90+ with nothing to review) a Playwright worker fills the real
+   form with the reviewed answers, attaches the resume PDF and marks it **submitted only when the page
+   confirms it**. CAPTCHAs, logins or unconfirmed submits go back to the user as "needs action".
+5. **Tracking**: submitted applications get a follow-up date 6 days later; the Follow-ups page drafts the email.
+
+## Known gaps / next round
+
+| Gap | Effect today | What's needed |
 |---|---|---|
-| **User id mismatch** — `jobs.py`, `matches.py`, `documents.py` use `current_user.id` (UUID derived from the Firebase uid), while profiles/resumes/applications store `current_user.user_id` (raw uid) | With real Firebase users, tailoring returns "Profile not found" and matches are stored under a different id | Use `current_user.user_id` (string) everywhere; change service signatures from `uuid.UUID` to `str` |
-| No Autopilot API | Dashboard shows Autopilot as "Coming soon" | `POST /v1/autopilot/start`, `POST /v1/autopilot/{id}/pause`, `POST /v1/autopilot/{id}/resume`, `GET /v1/autopilot` |
-| No preferences API | Roles/cities/salary/daily limit only editable by redoing onboarding | `GET/PUT /v1/preferences` |
-| No consent read API | Settings can grant/withdraw but can't show current state | `GET /v1/consents` |
-| No file upload | Resume text is extracted in the browser (PDF/.txt only, no DOCX) | `POST /v1/resumes/upload` (multipart) |
-| No document list per job | Tailored results disappear on reload | `GET /v1/jobs/{id}/documents` (latest resume version + cover letter) |
-| Profile CRUD is partial | Can't edit/delete experiences, skills, education, projects | `PATCH/DELETE` for each, `POST` for education/projects/certifications |
+| Small job pool | ~670 jobs from 14 company boards; very few frontend/design/data roles | Adzuna API keys (`ADZUNA_APP_ID`, `ADZUNA_APP_KEY`) and a longer verified company list |
+| Gemini free-tier quota | AI scoring/tailoring hit 429s; rules take over for matching, tailoring returns "try again" | A paid Gemini key, or lower AI use per run |
+| Crawl speed | One embedding call per job (~6 min for 670 jobs) | Batch embeddings |
+| Multi-resume profiles, weekly report, similar-job clustering | Not built (core flow first) | New endpoints + pages |
+| Gmail reply detection, full-auto mode, LinkedIn | Deliberately out of scope for launch | Later phases |
+| Profile CRUD is partial | Can't edit/delete every education/project entry | `PATCH/DELETE` per section |
 | Payments are sandbox | "Upgrade" shows a sandbox notice | Razorpay order + checkout + webhook |
