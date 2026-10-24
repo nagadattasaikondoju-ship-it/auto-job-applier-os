@@ -3,82 +3,40 @@
 import React, { useState, useMemo } from "react";
 import { Search, ChevronDown, CircleDollarSign, BarChart2, Target, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface FaqItem {
-  id: number;
-  question: string;
-  answer: string;
-  category: string;
-}
-
-const initialFaqs: FaqItem[] = [
-  {
-    id: 1,
-    question: "What assets can I trade on ZENTRADE?",
-    answer:
-      "Forex majors and minors, indices, commodities such as gold and oil, and popular cryptocurrencies, all from one account, with live spread, leverage and hours shown before each order.",
-    category: "About Zen Trade",
-  },
-  {
-    id: 2,
-    question: "What is ZENTRADE?",
-    answer:
-      "An online trading platform with access to global markets through a fast, secure, easy-to-use interface and dedicated support.",
-    category: "About Zen Trade",
-  },
-  {
-    id: 3,
-    question: "How do I open an account?",
-    answer:
-      "Sign up, complete the form, verify your identity, then make your first deposit.",
-    category: "Trading Rules & Guidelines",
-  },
-  {
-    id: 4,
-    question: "Which deposit and withdrawal methods are available?",
-    answer:
-      "The secure methods listed in your client area, varying by region.",
-    category: "Zen Trade Challenge Insight",
-  },
-  {
-    id: 5,
-    question: "What are the trading conditions?",
-    answer:
-      "Spreads, leverage and fees vary by account type and instrument; compare them on the Accounts page.",
-    category: "Zen Trade Features",
-  },
-];
+import { landingContent, FaqItem } from "@/content/landing";
 
 export function ZentradeFaqSection() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [openId, setOpenId] = useState<number | null>(1);
+  const [openId, setOpenId] = useState<number | null>(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const categories = [
     {
-      title: "About Zen Trade",
-      count: "62 Articles",
-      icon: <CircleDollarSign className="w-6 h-6 text-white" />,
+      title: "Platform",
+      count: "12 Articles",
+      icon: <CircleDollarSign className="w-6 h-6 text-white" aria-hidden="true" />,
     },
     {
-      title: "Trading Rules & Guidelines",
-      count: "62 Articles",
-      icon: <BarChart2 className="w-6 h-6 text-white" />,
+      title: "Resume Tailoring",
+      count: "18 Articles",
+      icon: <BarChart2 className="w-6 h-6 text-white" aria-hidden="true" />,
     },
     {
-      title: "Zen Trade Challenge Insight",
-      count: "62 Articles",
-      icon: <Target className="w-6 h-6 text-white" />,
+      title: "Pricing & Plans",
+      count: "8 Articles",
+      icon: <Target className="w-6 h-6 text-white" aria-hidden="true" />,
     },
     {
-      title: "Zen Trade Features",
-      count: "62 Articles",
-      icon: <TrendingUp className="w-6 h-6 text-white" />,
+      title: "Career Growth",
+      count: "24 Articles",
+      icon: <TrendingUp className="w-6 h-6 text-white" aria-hidden="true" />,
     },
   ];
 
+  const faqs = landingContent.faqs;
+
   const filteredFaqs = useMemo(() => {
-    return initialFaqs.filter((faq) => {
+    return faqs.filter((faq) => {
       const matchesSearch =
         faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
         faq.answer.toLowerCase().includes(searchQuery.toLowerCase());
@@ -87,28 +45,32 @@ export function ZentradeFaqSection() {
         : true;
       return matchesSearch && matchesCategory;
     });
-  }, [searchQuery, selectedCategory]);
+  }, [faqs, searchQuery, selectedCategory]);
 
-  const toggleAccordion = (id: number) => {
-    setOpenId((prev) => (prev === id ? null : id));
+  const toggleAccordion = (idx: number) => {
+    setOpenId((prev) => (prev === idx ? null : idx));
   };
 
   return (
     <section
       id="faq"
+      aria-labelledby="faq-heading"
       className="relative w-full bg-[#090909] text-white py-24 sm:py-32 px-4 sm:px-6 overflow-hidden border-t border-[#2F2F2F]"
     >
       {/* Central radial green glow */}
       <div
         className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] pointer-events-none opacity-50"
+        aria-hidden="true"
         style={{
           background: "radial-gradient(circle at 50% 20%, #1D2E13 0%, #090909 70%)",
         }}
       />
 
-      {/* Stepped green light bars at the top edge */}
-      <div className="absolute top-0 inset-x-0 h-48 flex justify-between pointer-events-none opacity-30 px-4 sm:px-12">
-        {/* Left stepped bars */}
+      {/* Stepped green light bars at top edge */}
+      <div
+        className="absolute top-0 inset-x-0 h-48 flex justify-between pointer-events-none opacity-30 px-4 sm:px-12"
+        aria-hidden="true"
+      >
         <div className="flex gap-3 sm:gap-6 items-start">
           <div className="w-6 sm:w-12 h-44 bg-gradient-to-b from-[#2A4B1B] to-transparent rounded-b-lg" />
           <div className="w-6 sm:w-12 h-36 bg-gradient-to-b from-[#2A4B1B] to-transparent rounded-b-lg" />
@@ -116,7 +78,6 @@ export function ZentradeFaqSection() {
           <div className="w-6 sm:w-12 h-20 bg-gradient-to-b from-[#2A4B1B] to-transparent rounded-b-lg" />
           <div className="w-6 sm:w-12 h-14 bg-gradient-to-b from-[#1D2F14] to-transparent rounded-b-lg" />
         </div>
-        {/* Right stepped bars */}
         <div className="flex gap-3 sm:gap-6 items-start flex-row-reverse">
           <div className="w-6 sm:w-12 h-44 bg-gradient-to-b from-[#2A4B1B] to-transparent rounded-b-lg" />
           <div className="w-6 sm:w-12 h-36 bg-gradient-to-b from-[#2A4B1B] to-transparent rounded-b-lg" />
@@ -129,41 +90,44 @@ export function ZentradeFaqSection() {
       <div className="relative z-10 max-w-4xl mx-auto">
         {/* Hero Block */}
         <div className="flex flex-col items-center text-center">
-          {/* Tag: FAQ */}
           <div className="px-5 py-2 rounded-full border border-[#83F34D]/30 bg-[#83F34D]/10 backdrop-blur-md mb-6 shadow-sm">
             <span className="text-sm font-semibold text-[#83F34D] tracking-wider font-figtree">
               FAQ
             </span>
           </div>
 
-          {/* Headline */}
-          <h2 className="text-4xl sm:text-5xl md:text-6xl font-extrabold font-figtree tracking-tight text-white leading-tight">
-            Frequently Asked Questions
+          <h2
+            id="faq-heading"
+            className="text-4xl sm:text-5xl md:text-6xl font-extrabold font-figtree tracking-tight text-white leading-tight"
+          >
+            Frequently asked questions about Applyon
           </h2>
 
-          {/* Lede */}
           <p className="mt-4 text-base sm:text-lg text-white/80 max-w-xl font-figtree leading-relaxed">
-            Find answers to the most common questions about ZENTRADE’s platforms, accounts, deposits, trading conditions, and more.
+            Find answers to the most common questions about Applyon’s AI job copilot, ATS resume tailoring, application autofill, and pricing.
           </p>
 
-          {/* White Button */}
-          <button
-            type="button"
-            onClick={() => {
-              document.getElementById("hero-waitlist")?.scrollIntoView({ behavior: "smooth" });
-            }}
-            className="mt-7 px-8 py-3.5 rounded-xl bg-white text-black font-semibold text-sm hover:scale-[1.02] transition-transform shadow-lg cursor-pointer font-figtree"
+          <a
+            href="#hero"
+            className="mt-7 inline-block px-8 py-3.5 rounded-xl bg-white text-black font-semibold text-sm hover:scale-[1.02] transition-transform shadow-lg cursor-pointer font-figtree"
           >
             Join Our Community
-          </button>
+          </a>
         </div>
 
         {/* Search Bar */}
         <div className="mt-14 relative max-w-2xl mx-auto">
+          <label htmlFor="faq-search-input" className="sr-only">
+            Search frequently asked questions
+          </label>
           <div className="relative flex items-center rounded-full bg-white/[0.08] border border-white/15 px-5 py-3.5 backdrop-blur-xl focus-within:border-[#83F34D] focus-within:ring-2 focus-within:ring-[#83F34D]/40 transition-all shadow-md">
-            <Search className="w-5 h-5 text-white/60 mr-3 shrink-0" />
+            <Search className="w-5 h-5 text-white/60 mr-3 shrink-0" aria-hidden="true" />
             <input
+              id="faq-search-input"
+              name="faq-search"
               type="text"
+              autoComplete="off"
+              suppressHydrationWarning
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search for your queries"
@@ -171,6 +135,7 @@ export function ZentradeFaqSection() {
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery("")}
                 className="text-xs text-white/60 hover:text-white ml-2 cursor-pointer"
               >
@@ -185,13 +150,12 @@ export function ZentradeFaqSection() {
           {categories.map((cat) => {
             const isSelected = selectedCategory === cat.title;
             return (
-              <div
+              <button
                 key={cat.title}
-                onClick={() =>
-                  setSelectedCategory(isSelected ? null : cat.title)
-                }
+                type="button"
+                onClick={() => setSelectedCategory(isSelected ? null : cat.title)}
                 className={cn(
-                  "p-5 rounded-full bg-[#1B1B1B] border transition-all duration-200 cursor-pointer flex items-center gap-4 hover:border-[#83F34D]/70",
+                  "p-5 rounded-full bg-[#1B1B1B] border transition-all duration-200 cursor-pointer flex items-center gap-4 text-left hover:border-[#83F34D]/70",
                   isSelected
                     ? "border-[#83F34D] bg-[#222222] shadow-[0_0_20px_rgba(131,243,77,0.15)]"
                     : "border-transparent"
@@ -208,45 +172,57 @@ export function ZentradeFaqSection() {
                     {cat.count}
                   </p>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
 
-        {/* Accordion Rows */}
+        {/* Accordion Rows: Answers are always rendered in the DOM for search bots */}
         <div className="mt-14 space-y-4">
           {filteredFaqs.length > 0 ? (
-            filteredFaqs.map((item) => {
-              const isOpen = openId === item.id;
+            filteredFaqs.map((item, idx) => {
+              const isOpen = openId === idx;
               return (
                 <div
-                  key={item.id}
+                  key={item.question}
                   className="rounded-2xl bg-[#131313] border border-[#2F2F2F]/60 overflow-hidden transition-all duration-200"
                 >
                   <button
                     type="button"
-                    onClick={() => toggleAccordion(item.id)}
+                    onClick={() => toggleAccordion(idx)}
+                    aria-expanded={isOpen}
+                    aria-controls={`faq-answer-${idx}`}
                     className="w-full p-5 sm:p-6 text-left flex items-center justify-between gap-4 cursor-pointer hover:bg-white/[0.02]"
                   >
-                    <span className="text-base sm:text-xl font-medium font-figtree text-white/95">
+                    <h3 className="text-base sm:text-xl font-medium font-figtree text-white/95">
                       {item.question}
-                    </span>
+                    </h3>
                     <div
                       className={cn(
                         "w-8 h-8 rounded-full border border-white/20 flex items-center justify-center shrink-0 transition-transform duration-300",
-                        isOpen ? "rotate-180 bg-[#83F34D]/10 border-[#83F34D]/50 text-[#83F34D]" : "text-white/60"
+                        isOpen
+                          ? "rotate-180 bg-[#83F34D]/10 border-[#83F34D]/50 text-[#83F34D]"
+                          : "text-white/60"
                       )}
                     >
-                      <ChevronDown className="w-4 h-4" />
+                      <ChevronDown className="w-4 h-4" aria-hidden="true" />
                     </div>
                   </button>
 
-                  {/* Smooth Accordion Body */}
-                  {isOpen && (
-                    <div className="px-5 sm:px-6 pb-6 pt-1 text-sm sm:text-base text-white/80 font-figtree leading-relaxed border-t border-[#2F2F2F]/40 animate-in fade-in duration-200">
-                      <p>{item.answer}</p>
+                  {/* DOM-persisted Answer Container for Crawlers */}
+                  <div
+                    id={`faq-answer-${idx}`}
+                    className={cn(
+                      "grid transition-all duration-300 ease-out",
+                      isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                    )}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="px-5 sm:px-6 pb-6 pt-1 text-sm sm:text-base text-white/80 font-figtree leading-relaxed border-t border-[#2F2F2F]/40">
+                        <p>{item.answer}</p>
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             })

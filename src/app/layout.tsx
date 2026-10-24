@@ -1,36 +1,90 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { JsonLd } from "@/components/seo/JsonLd";
+import { landingContent } from "@/content/landing";
+
+const siteUrl = landingContent.brand.url;
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#07070A" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+};
 
 export const metadata: Metadata = {
-  title: "Applyon — AI-Powered Job Applications for India",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: "Applyon — AI Job Applications for India | Tailor Resume & Autofill",
+    template: "%s | Applyon",
+  },
   description:
-    "AI-powered job applications for India's next generation of professionals. Discover matching roles, tailor your resume, autofill applications, and manage your job hunt from one dashboard.",
-  keywords: [
-    "AI job application India",
-    "resume tailoring",
-    "job search India",
-    "autofill job applications",
-    "fresher jobs",
-    "Applyon",
-    "AI job copilot",
-  ],
+    "Applyon is your AI job search assistant for India. Find matching jobs, tailor an ATS-friendly resume, autofill applications and track every application in one dashboard.",
+  applicationName: "Applyon",
+  category: "Career",
   authors: [{ name: "Applyon Team" }],
   creator: "Applyon",
-  publisher: "Applyon Inc.",
-  metadataBase: new URL("https://applyon.ai"),
+  publisher: "Applyon",
+  keywords: [
+    "AI job application India",
+    "AI resume tailoring",
+    "ATS friendly resume",
+    "autofill job applications",
+    "job search app India",
+    "jobs for freshers",
+    "cover letter generator",
+    "job application tracker",
+    "AI job search assistant",
+    "how to tailor resume for each job",
+    "how to get more interview calls",
+    "best AI tool for job search in India",
+    "apply for jobs faster",
+    "resume for freshers in India",
+  ],
+  alternates: {
+    canonical: "/",
+    languages: {
+      "en-IN": "/",
+    },
+  },
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: "https://applyon.ai",
-    title: "Applyon — Apply smarter. Interview sooner.",
-    description:
-      "Automate your busywork with intelligent agents that learn, adapt, and execute—so your team can focus on what matters most.",
+    url: siteUrl,
     siteName: "Applyon",
+    title: "Applyon — AI Job Applications for India | Tailor Resume & Autofill",
+    description:
+      "Applyon is your AI job search assistant for India. Find matching jobs, tailor an ATS-friendly resume, autofill applications and track every application in one dashboard.",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Applyon — AI Job Applications for India",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Applyon — AI Job Application Copilot",
-    description: "Apply smarter. Interview sooner.",
+    title: "Applyon — AI Job Applications for India",
+    description:
+      "Find matching jobs, tailor an ATS-friendly resume, autofill applications and track every application in one dashboard.",
+    images: ["/twitter-image"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    "max-image-preview": "large",
+    "max-snippet": -1,
+  },
+  manifest: "/manifest.webmanifest",
+  verification: {
+    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || undefined,
+    other: process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION
+      ? { "msvalidate.01": process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION }
+      : undefined,
   },
 };
 
@@ -39,30 +93,12 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    name: "Applyon",
-    applicationCategory: "BusinessApplication",
-    operatingSystem: "Web",
-    offers: {
-      "@type": "Offer",
-      price: "0",
-      priceCurrency: "INR",
-    },
-    description:
-      "AI-powered job application copilot for discovering roles, tailoring resumes, and autofilling applications.",
-  };
-
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en-IN" suppressHydrationWarning>
       <head>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
+        <JsonLd />
       </head>
-      <body className="antialiased selection:bg-indigo-500/20 selection:text-indigo-600">
+      <body className="antialiased selection:bg-indigo-500/20 selection:text-indigo-600 font-body">
         {children}
       </body>
     </html>
