@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.core.models.jobs import Job, JobFormSchema
+from packages.core.models.jobs import Company, Job, JobFormSchema
 from packages.core.seed.field_label_synonyms import lookup_canonical_field, normalize_field_label
 
 
@@ -369,11 +369,15 @@ class FormSchemaService:
         extracted_fields: list[FieldDefinition] = []
         extraction_method = "generic"
 
+        # Board token + posting id: from the URL when possible, else from the company registry
+        company = (await self.db.execute(select(Company).where(Company.id == job.company_id))).scalar_one_or_none()
+        registry_token = company.ats_board_token if company else None
+
         if job.ats_type == "greenhouse":
-            # Extract board_token and job_id from URL
-            m = re.search(r"greenhouse\.io/(?:embed/)?(?:jobs|v1/boards)/([^/]+)/jobs/(\d+)", job.apply_url)
-            if m:
-                board_token, ext_id = m.group(1), m.group(2)
+            m = re.search(r"greenhouse\.io/(?:embed/)?(?:jobs|v1/boards/)?([^/]+)/jobs/(\d+)", job.application_url)
+            ids = (m.group(1), m.group(2)) if m else ((registry_token, job.external_id) if registry_token else None)
+            if ids:
+                board_token, ext_id = ids
                 api_url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs/{ext_id}?questions=true"
                 try:
                     async with httpx.AsyncClient(timeout=8.0) as client:
@@ -386,10 +390,11 @@ class FormSchemaService:
                     pass
 
         elif job.ats_type == "lever":
-            m = re.search(r"jobs\.lever\.co/([^/]+)/([a-f0-9\-]+)", job.apply_url)
-            if m:
-                company, post_id = m.group(1), m.group(2)
-                api_url = f"https://api.lever.co/v0/postings/{company}/{post_id}"
+            m = re.search(r"jobs\.lever\.co/([^/]+)/([a-f0-9\-]+)", job.application_url)
+            ids = (m.group(1), m.group(2)) if m else ((registry_token, job.external_id) if registry_token else None)
+            if ids:
+                lever_company, post_id = ids
+                api_url = f"https://api.lever.co/v0/postings/{lever_company}/{post_id}"
                 try:
                     async with httpx.AsyncClient(timeout=8.0) as client:
                         resp = await client.get(api_url)

@@ -102,12 +102,28 @@ def has_metric(s: str) -> bool:
     return bool(re.search(r"\d+\s*(%|x|k|m|cr|lpa|l\b|ms|hrs?|users|customers|clients)|[₹$]\s?\d|\d{2,}", s, re.I))
 
 
+# Skills that are also everyday English words only count when capitalised ("Go", not "go live")
+_CASE_SENSITIVE_SKILLS = {"Go", "Express", "Swift", "Excel", "Spark", "Git", "Vite", "Android", "Linux"}
+
+# Roman-numeral levels, role abbreviations and web domains look like tech tokens but aren't skills
+_NOT_A_SKILL = re.compile(r"^(I{1,3}|IV|VI{0,3}|SDE\d?|SWE|SDET|[\w-]+\.(com|io|in|ai|co|org|net|dev)(/.*)?)$", re.I)
+
+
 def _keywords_from(text: str) -> set[str]:
     """Skill-like keywords: known taxonomy skills plus tech-style tokens (React, AWS, C++, Node.js)."""
     lower = text.lower()
-    found = {s for s in ALL_SKILLS if re.search(rf"(?<![\w]){re.escape(s.lower())}(?![\w])", lower)}
+    found = {
+        s
+        for s in ALL_SKILLS
+        if re.search(
+            rf"(?<![\w]){re.escape(s if s in _CASE_SENSITIVE_SKILLS else s.lower())}(?![\w])",
+            text if s in _CASE_SENSITIVE_SKILLS else lower,
+        )
+    }
     for tok in re.findall(r"\b[A-Z][A-Za-z0-9+#.\-]{1,24}\b", text):
         t = tok.strip(".-")
+        if _NOT_A_SKILL.match(t):
+            continue
         if len(t) > 1 and t.lower() not in _STOPWORDS and (any(c.isupper() for c in t[1:]) or re.search(r"[+#.\d]", t)):
             found.add(t)
     return found
@@ -379,6 +395,15 @@ def heuristic_parse(text: str) -> dict[str, Any]:
         grade = re.search(r"(\d\.\d+\s*(?:cgpa|gpa)|\d{2}(?:\.\d+)?\s*%)", ln, re.I)
         educations.append({"institution": ln, "degree": "", "field": "", "grade": grade.group(1) if grade else ""})
 
+    links: dict[str, str] = {}
+    for key, pattern in (
+        ("linkedin", r"(?:https?://)?(?:www\.)?linkedin\.com/in/[\w\-%]+"),
+        ("github", r"(?:https?://)?(?:www\.)?github\.com/[\w\-]+"),
+    ):
+        m = re.search(pattern, text, re.I)
+        if m:
+            links[key] = m.group(0) if m.group(0).startswith("http") else f"https://{m.group(0)}"
+
     skills_text = " ".join(sections.get("skills", [])) or text
     skills = sorted(_keywords_from(skills_text))[:40]
 
@@ -394,6 +419,7 @@ def heuristic_parse(text: str) -> dict[str, Any]:
         "total_experience_months": 0,
         "current_title": experiences[0]["title"] if experiences else "",
         "current_company": experiences[0]["company"] if experiences else "",
+        "links": links,
         "experiences": [e for e in experiences if e["title"]],
         "educations": educations,
         "skills": [{"name": s, "category": "technical"} for s in skills],

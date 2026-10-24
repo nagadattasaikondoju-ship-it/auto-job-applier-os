@@ -17,7 +17,7 @@ from apps.api.deps.db import get_db
 from packages.core.models.applications import Application, ApplicationEvent
 from packages.core.models.profile import Experience, Profile
 from packages.core.services.applications import ApplicationsService
-from packages.core.services.followups import draft_follow_up
+from packages.core.services.followups import draft_follow_up, pick_highlight
 
 router = APIRouter(prefix="/applications", tags=["Applications"])
 
@@ -194,11 +194,10 @@ async def draft_application_follow_up(
     detail = await ApplicationsService(db).get_application_detail(user_id=user.user_id, application_id=application_id)
     app_obj = await _owned_app(db, user.user_id, application_id)
     profile = (await db.execute(select(Profile).where(Profile.user_id == user.user_id))).scalar_one_or_none()
-    highlight = None
-    exp = (await db.execute(select(Experience).where(Experience.user_id == user.user_id))).scalars().first()
-    if exp and exp.bullets:
-        b = exp.bullets[0]
-        highlight = (b.get("text") if isinstance(b, dict) else str(b)) or None
+    exps = (await db.execute(select(Experience).where(Experience.user_id == user.user_id))).scalars().all()
+    highlight = pick_highlight(
+        [b.get("text", "") if isinstance(b, dict) else str(b) for e in exps for b in (e.bullets or [])]
+    )
     return await draft_follow_up(
         name=profile.full_name if profile else "",
         job_title=detail["job"]["title"],

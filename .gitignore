@@ -68,3 +68,8 @@ wheels/
 *.tsbuildinfo
 next-env.d.ts
 
+
+# Local runtime output
+/artifacts/
+/storage/
+dump.rdb

@@ -13,6 +13,7 @@ from apps.api.deps.db import get_db
 from packages.core.models.applications import Application
 from packages.core.models.jobs import Job
 from packages.core.services.applications import ApplicationsService
+from packages.core.services.jobs import ingest_normalized_job
 from packages.jobs_sources.detector import detect_ats
 from packages.jobs_sources.manual import ManualUrlImporter
 
@@ -43,8 +44,9 @@ async def get_fill_plan(
 
     if not job:
         # Auto-import job
-        importer = ManualUrlImporter(db)
-        job = await importer.import_from_url(url=url, user_id=user.user_id)
+        normalized = await ManualUrlImporter().import_url(url=url)
+        job, _ = await ingest_normalized_job(session=db, job_in=normalized)
+        await db.commit()
 
     # 3. Create or get application & resolved plan
     svc = ApplicationsService(db)

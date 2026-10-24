@@ -108,10 +108,10 @@ export function ZentradeFaqSection() {
           </p>
 
           <a
-            href="#hero"
+            href="/signup"
             className="mt-7 inline-block px-8 py-3.5 rounded-xl bg-white text-black font-semibold text-sm hover:scale-[1.02] transition-transform shadow-lg cursor-pointer font-figtree"
           >
-            Join Our Community
+            Apply for jobs
           </a>
         </div>
 

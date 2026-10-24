@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowLeft,
+  Bookmark,
+  BookmarkCheck,
   Building2,
   CheckCircle2,
   ExternalLink,
@@ -49,6 +51,16 @@ export default function JobDetailPage() {
       } else {
         toast.success("Thanks, this improves your future matches.");
       }
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const save = useMutation({
+    mutationFn: (on: boolean) => api.jobs.save(id, on),
+    onSuccess: (_, on) => {
+      toast.success(on ? "Saved for later." : "Removed from saved jobs.");
+      void queryClient.invalidateQueries({ queryKey: ["job", id] });
+      void queryClient.invalidateQueries({ queryKey: ["matches"] });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -132,6 +144,19 @@ export default function JobDetailPage() {
               <ExternalLink className="size-4" aria-hidden="true" />
               Open posting
             </ButtonLink>
+            <Button
+              variant="ghost"
+              onClick={() => save.mutate(j.match?.status !== "saved")}
+              loading={save.isPending}
+              aria-pressed={j.match?.status === "saved"}
+            >
+              {j.match?.status === "saved" ? (
+                <BookmarkCheck className="size-4 text-app-accent" aria-hidden="true" />
+              ) : (
+                <Bookmark className="size-4" aria-hidden="true" />
+              )}
+              {j.match?.status === "saved" ? "Saved" : "Save"}
+            </Button>
           </div>
 
           {j.required_skills && j.required_skills.length > 0 && (

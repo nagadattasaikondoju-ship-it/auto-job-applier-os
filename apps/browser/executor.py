@@ -1,12 +1,30 @@
 """Browser automation executor for ATS form filling and submission."""
 
 import logging
+import os
+import re
 from typing import Any
 from uuid import UUID
 
 from apps.browser.adapters import AutomationResult, get_adapter
 
 logger = logging.getLogger(__name__)
+
+
+_CONFIRMED = re.compile(
+    r"thank(s| you) for (applying|your (application|interest))|application (has been )?(submitted|received)"
+    r"|we('ve| have) received your application|successfully (applied|submitted)",
+    re.I,
+)
+_FORM_ERRORS = re.compile(r"(this field is required|is required|can't be blank|please (fill|complete|enter))", re.I)
+
+
+def submission_confirmed(html: str, form_url: str, current_url: str) -> bool:
+    """True only when the page clearly shows the application went through."""
+    text = re.sub(r"<[^>]+>", " ", html)
+    if _CONFIRMED.search(text):
+        return True
+    return current_url.rstrip("/") != form_url.rstrip("/") and not _FORM_ERRORS.search(text)
 
 
 class BrowserAutomationExecutor:
@@ -69,6 +87,7 @@ class BrowserAutomationExecutor:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=self.headless,
+                    executable_path=os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE") or None,
                     args=["--disable-blink-features=AutomationControlled"],
                 )
                 context = await browser.new_context(
@@ -95,7 +114,7 @@ class BrowserAutomationExecutor:
                 # Check for blockers
                 blocker = adapter.detect_blockers(content, current_url)
                 if blocker:
-                    screenshot_path = f"storage/artifacts/{application_id}_blocked.png"
+                    screenshot_path: str | None = f"storage/artifacts/{application_id}_blocked.png"
                     try:
                         await page.screenshot(path=screenshot_path)
                     except Exception:
@@ -122,17 +141,19 @@ class BrowserAutomationExecutor:
                     except Exception as e:
                         logger.warning(f"Failed to attach resume file: {e}")
 
-                proof_path = f"storage/artifacts/{application_id}_proof.png"
+                # Submit if requested and not in dry-run mode. A click only counts once the page
+                # shows a confirmation (thank-you text or a new URL without validation errors).
+                submitted = False
+                if not dry_run and await adapter.submit_playwright(page):
+                    await page.wait_for_timeout(4000)
+                    submitted = submission_confirmed(await page.content(), current_url, page.url)
+
+                proof_path: str | None = f"storage/artifacts/{application_id}_proof.png"
                 try:
+                    os.makedirs("storage/artifacts", exist_ok=True)
                     await page.screenshot(path=proof_path, full_page=True)
                 except Exception:
                     proof_path = None
-
-                # Submit if requested and not in dry-run mode
-                submitted = False
-                if not dry_run:
-                    submitted = await adapter.submit_playwright(page)
-                    await page.wait_for_timeout(2000)
 
                 await browser.close()
 

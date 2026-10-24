@@ -228,3 +228,24 @@ async def test_company_diversification_and_cycle_execution():
         assert res["auto_submitted"] is expect_submit
         assert mock_enqueue.called is expect_submit
         assert match.status == "queued"
+
+
+def test_submission_needs_visible_confirmation() -> None:
+    from apps.browser.executor import submission_confirmed
+
+    form = "https://boards.greenhouse.io/acme/jobs/1"
+    assert submission_confirmed("<h1>Thank you for applying!</h1>", form, form)
+    assert submission_confirmed("<p>Done</p>", form, form + "/confirmation")
+    assert not submission_confirmed("<p>Email is required</p>", form, form + "?error=1")
+    assert not submission_confirmed("<form>...</form>", form, form)
+
+
+def test_worker_uses_the_reviewed_plan() -> None:
+    import json
+
+    from apps.workers.tasks.autopilot import _stored_plan_fields
+
+    plan = {"fields": [{"field_id": "email", "value": "a@b.com"}], "can_auto_submit": True}
+    assert _stored_plan_fields(json.dumps(plan)) == plan["fields"]
+    assert _stored_plan_fields("Candidate approved") == []
+    assert _stored_plan_fields(None) == []

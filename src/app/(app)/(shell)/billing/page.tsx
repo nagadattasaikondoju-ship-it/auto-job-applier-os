@@ -37,7 +37,7 @@ export default function BillingPage() {
   });
 
   const b = balance.data;
-  const daily = b && typeof b.daily_limit === "object" ? b.daily_limit : null;
+  const daily = b?.daily_limit ?? null;
 
   return (
     <>
@@ -58,7 +58,7 @@ export default function BillingPage() {
                 <p className="mt-2 font-display text-3xl">{b!.plan_name}</p>
                 {daily && (
                   <p className="mt-1 text-xs text-app-muted">
-                    Up to <span className="font-mono">{daily.limit ?? "—"}</span> applications a day
+                    Up to <span className="font-mono">{daily.daily_limit}</span> applications a day
                   </p>
                 )}
               </Card>
@@ -79,16 +79,16 @@ export default function BillingPage() {
         </div>
       )}
 
-      {daily && typeof daily.used === "number" && typeof daily.limit === "number" && (
+      {daily && (
         <Card className="mb-8 p-5">
           <div className="flex justify-between text-sm">
-            <span>Applications today</span>
+            <span>Applications submitted today</span>
             <span className="font-mono">
-              {daily.used} / {daily.limit}
+              {daily.count_today} / {daily.daily_limit}
             </span>
           </div>
           <div className="mt-2">
-            <ProgressBar value={(daily.used / Math.max(1, daily.limit)) * 100} label="Daily applications used" />
+            <ProgressBar value={(daily.count_today / Math.max(1, daily.daily_limit)) * 100} label="Daily applications used" />
           </div>
         </Card>
       )}

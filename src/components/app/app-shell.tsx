@@ -3,15 +3,19 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
+  BellRing,
   Briefcase,
   ClipboardCheck,
   CreditCard,
+  FileCheck2,
   LayoutDashboard,
   ListChecks,
   LogOut,
   Menu,
   MessageSquareText,
+  Rocket,
   Settings,
+  SlidersHorizontal,
   UserRound,
   X,
 } from "lucide-react";
@@ -25,10 +29,14 @@ import { AppLogo } from "./logo";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/resume", label: "Resume & ATS", icon: FileCheck2 },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/auto-apply", label: "Auto-apply", icon: Rocket },
   { href: "/review", label: "Review queue", icon: ClipboardCheck, badge: "review" as const },
   { href: "/applications", label: "Applications", icon: ListChecks },
+  { href: "/follow-ups", label: "Follow-ups", icon: BellRing },
   { href: "/answers", label: "Answer bank", icon: MessageSquareText },
+  { href: "/preferences", label: "Preferences", icon: SlidersHorizontal },
   { href: "/profile", label: "Profile", icon: UserRound },
   { href: "/billing", label: "Plan & credits", icon: CreditCard },
   { href: "/settings", label: "Settings", icon: Settings },

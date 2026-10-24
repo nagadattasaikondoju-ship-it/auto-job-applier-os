@@ -1,6 +1,8 @@
 """Celery tasks for Autopilot scheduler and browser automation workers."""
 
+import json
 import logging
+import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -13,12 +15,12 @@ from packages.core.async_utils import run_async
 from packages.core.database import async_session_maker
 from packages.core.models.applications import Application, ApplicationEvent, Campaign
 from packages.core.models.jobs import Job
+from packages.core.models.matching import ResumeVersion
 from packages.core.models.platform import Notification
-from packages.core.models.profile import Profile
-from packages.core.services.answer_resolver import AnswerResolutionService
+from packages.core.models.profile import ProfileVersion
 from packages.core.services.autopilot import AutopilotService
 from packages.core.services.credits import CreditsService
-from packages.core.services.form_schema import FormSchemaService
+from packages.documents.export import build_resume_document, resume_pdf_bytes
 
 logger = logging.getLogger("applyon.workers.autopilot")
 
@@ -40,33 +42,17 @@ async def _async_execute_browser_application(
         if not job:
             return {"error": "Job not found", "application_id": application_id_str}
 
-        prof_res = await session.execute(
-            select(Profile).where(Profile.user_id == application.user_id)
-        )
-        profile = prof_res.scalar_one_or_none()
-        if not profile:
-            return {"error": "Profile not found", "application_id": application_id_str}
-
-        # Extract schema and resolve answers
-        form_schema = await FormSchemaService.extract_form_schema(
-            session=session,
-            url=job.application_url,
-            ats_type=job.ats_type or "generic",
-        )
-        resolved_fields = await AnswerResolutionService.resolve_all_fields(
-            session=session,
-            user_id=application.user_id,
-            fields=form_schema.get("fields", []),
-            job_description=job.description_text or "",
-            profile=profile,
-        )
+        # The plan the user reviewed (with their edits) is stored on the application
+        resolved_fields = _stored_plan_fields(application.notes)
+        resume_path = await _write_resume_pdf(session, application.user_id, application.resume_version_id)
 
         executor = BrowserAutomationExecutor()
         auto_result = await executor.execute_application(
             application_id=application.id,
-            application_url=job.application_url,
+            application_url=application.application_url or job.application_url,
             ats_type=job.ats_type or "generic",
             fields=resolved_fields,
+            resume_path=resume_path,
             dry_run=dry_run,
         )
 
@@ -156,6 +142,37 @@ async def _async_execute_browser_application(
             "status": application.status,
             "fields_filled": auto_result.fields_filled,
         }
+
+
+def _stored_plan_fields(notes: str | None) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(notes or "{}")
+    except ValueError:
+        return []
+    return list(data.get("fields") or []) if isinstance(data, dict) else []
+
+
+async def _write_resume_pdf(session: Any, user_id: str, resume_version_id: uuid.UUID | None) -> str | None:
+    """Render the application's resume (tailored version, else the latest master) to a temp PDF."""
+    ver = None
+    if resume_version_id:
+        ver = (
+            await session.execute(select(ResumeVersion).where(ResumeVersion.id == resume_version_id))
+        ).scalar_one_or_none()
+    snap_query = select(ProfileVersion).where(ProfileVersion.user_id == user_id)
+    if ver:
+        snap_query = snap_query.where(ProfileVersion.id == ver.profile_version_id)
+    snap = (
+        await session.execute(snap_query.order_by(ProfileVersion.version_no.desc()).limit(1))
+    ).scalar_one_or_none()
+    if not snap:
+        return None
+    doc = build_resume_document(snap.snapshot_json, ver.content_json if ver else None)
+    safe = "".join(c for c in doc["name"] if c.isalnum() or c in " _-").strip().replace(" ", "_") or "Resume"
+    path = f"{tempfile.mkdtemp(prefix='applyon-')}/{safe}_Resume.pdf"
+    with open(path, "wb") as fh:
+        fh.write(resume_pdf_bytes(doc))
+    return path
 
 
 async def _async_autopilot_tick() -> dict[str, Any]:

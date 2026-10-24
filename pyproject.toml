@@ -24,6 +24,7 @@ dependencies = [
     "pypdf>=6.21.2",
     "python-docx>=1.2.0",
     "fpdf2>=2.8.9",
+    "playwright>=1.50",
 ]
 
 [project.optional-dependencies]

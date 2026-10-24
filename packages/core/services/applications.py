@@ -112,7 +112,7 @@ class ApplicationsService:
             campaign_id=campaign_id,
             status=initial_status,
             channel=channel,
-            application_url=getattr(job, "application_url", getattr(job, "apply_url", "")),
+            application_url=job.application_url,
             notes=json.dumps(plan.model_dump()),
         )
         self.db.add(app_obj)

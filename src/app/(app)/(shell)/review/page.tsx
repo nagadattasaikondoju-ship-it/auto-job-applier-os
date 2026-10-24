@@ -64,7 +64,12 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
 
   const approve = useMutation({
     mutationFn: () => api.reviewQueue.approve(app.id),
-    onSuccess: () => done(`Approved. ${app.job.company_name} application is on its way.`),
+    onSuccess: (r) =>
+      done(
+        r.submission_queued
+          ? `Approved. We're submitting your ${app.job.company_name} application.`
+          : `Approved. Open the application page with the Applyon extension to submit it.`
+      ),
     onError: (e) => toast.error(e.message),
   });
   const reject = useMutation({

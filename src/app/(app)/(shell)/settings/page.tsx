@@ -1,11 +1,11 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Button, ButtonLink, Card, CardHeader, Dialog, Field, Input, PageHeader } from "@/components/app/ui";
+import { Button, ButtonLink, Card, CardHeader, Checkbox, Dialog, Field, Input, PageHeader, Skeleton } from "@/components/app/ui";
 import { api } from "@/lib/api/endpoints";
 import type { ConsentPurpose } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth";
@@ -34,9 +34,15 @@ export default function SettingsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
 
+  const queryClient = useQueryClient();
+  const consents = useQuery({ queryKey: ["consents"], queryFn: api.consents.get });
   const consent = useMutation({
     mutationFn: ({ purpose, granted }: { purpose: ConsentPurpose; granted: boolean }) => api.consents.set(purpose, granted),
-    onSuccess: (_, v) => toast.success(v.granted ? "Permission granted." : "Permission withdrawn."),
+    onSuccess: (_, v) => {
+      toast.success(v.granted ? "Permission granted." : "Permission withdrawn.");
+      void queryClient.invalidateQueries({ queryKey: ["consents"] });
+      void queryClient.invalidateQueries({ queryKey: ["autopilot"] });
+    },
     onError: (e) => toast.error(e.message),
   });
 
@@ -70,8 +76,8 @@ export default function SettingsPage() {
               <ButtonLink href="/profile" variant="secondary" size="sm">
                 Edit profile
               </ButtonLink>
-              <ButtonLink href="/onboarding" variant="secondary" size="sm">
-                Redo onboarding questions
+              <ButtonLink href="/preferences" variant="secondary" size="sm">
+                Job preferences
               </ButtonLink>
             </div>
           </div>
@@ -85,29 +91,18 @@ export default function SettingsPage() {
           />
           <ul className="divide-y divide-app-border border-t border-app-border">
             {CONSENTS.map((c) => (
-              <li key={c.purpose} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
-                <div className="flex-1">
-                  <p className="font-medium">{c.label}</p>
-                  <p className="text-app-muted">{c.description}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => consent.mutate({ purpose: c.purpose, granted: true })}
+              <li key={c.purpose} className="px-5 py-4">
+                {consents.isPending ? (
+                  <Skeleton className="h-10" />
+                ) : (
+                  <Checkbox
+                    checked={Boolean(consents.data?.consents[c.purpose])}
                     disabled={consent.isPending}
-                  >
-                    Allow
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => consent.mutate({ purpose: c.purpose, granted: false })}
-                    disabled={consent.isPending}
-                  >
-                    Withdraw
-                  </Button>
-                </div>
+                    onChange={(granted) => consent.mutate({ purpose: c.purpose, granted })}
+                    label={c.label}
+                    description={c.description}
+                  />
+                )}
               </li>
             ))}
           </ul>

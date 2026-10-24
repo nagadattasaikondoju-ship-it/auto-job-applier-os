@@ -56,7 +56,7 @@ class ParsedResumeOutput(BaseModel):
     country: str = "India"
     headline: str = ""
     summary: str = ""
-    total_experience_months: int = 0
+    total_experience_months: int = Field(default=0, ge=0, le=600)
     current_title: str = ""
     current_company: str = ""
     experiences: list[ParsedExperience] = Field(default_factory=list)

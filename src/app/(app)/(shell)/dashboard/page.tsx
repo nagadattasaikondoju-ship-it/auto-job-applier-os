@@ -1,27 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ClipboardCheck, Rocket, Sparkles } from "lucide-react";
+import { ArrowRight, BellRing, Check, ClipboardCheck, Rocket, Search } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { JobCard } from "@/components/app/job-card";
-import {
-  Badge,
-  Button,
-  ButtonLink,
-  Card,
-  CardHeader,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  ProgressBar,
-  Skeleton,
-  SkeletonList,
-  Stat,
-} from "@/components/app/ui";
+import { Button, ButtonLink, Card, CardHeader, EmptyState, ErrorState, PageHeader, Skeleton, SkeletonList, Stat } from "@/components/app/ui";
 import { api } from "@/lib/api/endpoints";
 import { useAuth } from "@/lib/auth";
-import { humanize } from "@/lib/format";
+import { formatDate, humanize } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const FUNNEL_LABEL: Record<string, string> = {
   matched: "Matched",
@@ -41,24 +29,35 @@ export default function DashboardPage() {
   const queryClient = useQueryClient();
   const overview = useQuery({ queryKey: ["analytics", "overview"], queryFn: api.analytics.overview });
   const funnel = useQuery({ queryKey: ["analytics", "funnel"], queryFn: api.analytics.funnel });
-  const matches = useQuery({
-    queryKey: ["matches", { limit: 5 }],
-    queryFn: () => api.matches.list({ limit: 5 }),
-  });
+  const matches = useQuery({ queryKey: ["matches", { limit: 5 }], queryFn: () => api.matches.list({ limit: 5 }) });
   const review = useQuery({ queryKey: ["review-queue", 1], queryFn: () => api.reviewQueue.list(1) });
+  const autopilot = useQuery({ queryKey: ["autopilot"], queryFn: api.autopilot.get });
+  const profile = useQuery({ queryKey: ["profile"], queryFn: api.profile.get, retry: false });
+  const prefs = useQuery({ queryKey: ["preferences"], queryFn: api.preferences.get });
+  const versions = useQuery({ queryKey: ["resume-versions"], queryFn: api.documents.resumeVersions });
+  const followUps = useQuery({ queryKey: ["follow-ups"], queryFn: api.applications.followUps });
 
-  const refresh = useMutation({
-    mutationFn: api.matches.refresh,
+  const discover = useMutation({
+    mutationFn: api.jobs.discover,
     onSuccess: (r) => {
-      toast.success(r.new_matches_count ? `${r.new_matches_count} new matches found.` : "No new matches right now.");
-      void queryClient.invalidateQueries({ queryKey: ["matches"] });
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      toast.success(r.message);
+      setTimeout(() => void queryClient.invalidateQueries({ queryKey: ["matches"] }), 15_000);
     },
     onError: (e) => toast.error(e.message),
   });
 
   const firstName = (user?.displayName || "").split(" ")[0];
   const o = overview.data;
+  const campaign = autopilot.data?.campaign ?? null;
+
+  const steps = [
+    { label: "Upload your resume", done: profile.isSuccess, href: "/onboarding" },
+    { label: "Fix it for ATS", done: (versions.data?.items ?? []).some((v) => v.kind === "optimized"), href: "/resume" },
+    { label: "Tell us what you want", done: Boolean(prefs.data?.exists), href: "/preferences" },
+    { label: "Turn on auto-apply", done: Boolean(campaign), href: "/auto-apply" },
+  ];
+  const setupDone = steps.every((s) => s.done);
+  const loadingSetup = profile.isPending || prefs.isPending || versions.isPending || autopilot.isPending;
 
   return (
     <>
@@ -66,25 +65,49 @@ export default function DashboardPage() {
         title={`${greeting()}${firstName ? `, ${firstName}` : ""}`}
         description="Here's where your job search stands today."
         actions={
-          <Button variant="secondary" onClick={() => refresh.mutate()} loading={refresh.isPending}>
-            <Sparkles className="size-4" aria-hidden="true" />
-            Find new matches
+          <Button variant="secondary" onClick={() => discover.mutate()} loading={discover.isPending}>
+            <Search className="size-4" aria-hidden="true" />
+            Find jobs now
           </Button>
         }
       />
 
-      {o && o.profile_completeness_score < 80 && (
-        <Card className="mb-6 p-5 flex flex-col gap-4 sm:flex-row sm:items-center">
-          <div className="flex-1">
-            <p className="font-medium">Your profile is {o.profile_completeness_score}% complete</p>
-            <p className="text-app-muted">Reach 80% to get better matches and unlock Autopilot.</p>
-            <div className="mt-3 max-w-sm">
-              <ProgressBar value={o.profile_completeness_score} label="Profile completeness" />
+      {!loadingSetup && !setupDone && (
+        <Card as="section" aria-labelledby="setup-title" className="mb-6 p-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center">
+            <div className="md:w-56">
+              <h2 id="setup-title" className="font-medium">
+                Finish setting up
+              </h2>
+              <p className="text-app-muted">
+                {steps.filter((s) => s.done).length} of {steps.length} done
+              </p>
             </div>
+            <ol className="grid flex-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {steps.map((s, i) => (
+                <li key={s.label}>
+                  <Link
+                    href={s.href}
+                    className={cn(
+                      "flex h-full items-center gap-2 rounded-app-lg border px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-app-accent",
+                      s.done ? "border-app-border bg-app-bg text-app-muted" : "border-app-ink bg-app-card text-app-ink hover:bg-app-panel"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-6 shrink-0 items-center justify-center rounded-full text-xs",
+                        s.done ? "bg-app-accent text-app-ink" : "bg-app-ink text-app-card"
+                      )}
+                    >
+                      {s.done ? <Check className="size-3.5" aria-hidden="true" /> : i + 1}
+                    </span>
+                    <span className={cn(s.done && "line-through")}>{s.label}</span>
+                    <span className="sr-only">{s.done ? "(done)" : "(to do)"}</span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
           </div>
-          <ButtonLink href="/onboarding" variant="primary">
-            Finish setup
-          </ButtonLink>
         </Card>
       )}
 
@@ -93,7 +116,7 @@ export default function DashboardPage() {
           <ErrorState error={overview.error} onRetry={() => overview.refetch()} />
         </Card>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {overview.isPending ? (
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-app-xl" />)
           ) : (
@@ -108,9 +131,9 @@ export default function DashboardPage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="flex flex-col gap-6 lg:col-span-2">
           <section aria-labelledby="top-matches">
-            <div className="flex items-center justify-between mb-3">
+            <div className="mb-3 flex items-center justify-between">
               <h2 id="top-matches" className="text-base font-medium">
                 Top matches for you
               </h2>
@@ -128,8 +151,20 @@ export default function DashboardPage() {
               <Card>
                 <EmptyState
                   title="No matches yet"
-                  description="We're scanning new jobs for you. Check back soon, or import a job you found yourself."
-                  action={<ButtonLink href="/jobs">Browse jobs</ButtonLink>}
+                  description={
+                    prefs.data?.exists
+                      ? "We're searching job sources for your roles. Click “Find jobs now” to search immediately."
+                      : "Tell us what roles you want and we'll start finding matches."
+                  }
+                  action={
+                    prefs.data?.exists ? (
+                      <Button onClick={() => discover.mutate()} loading={discover.isPending}>
+                        Find jobs now
+                      </Button>
+                    ) : (
+                      <ButtonLink href="/preferences">Set preferences</ButtonLink>
+                    )
+                  }
                 />
               </Card>
             ) : (
@@ -154,6 +189,34 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex flex-col gap-6">
+          <Card as="section" aria-labelledby="autopilot-card">
+            <CardHeader
+              id="autopilot-card"
+              title="Auto-apply"
+              description={
+                campaign
+                  ? campaign.status === "active"
+                    ? `On · ${campaign.mode === "hybrid" ? "Hybrid" : "Review first"}`
+                    : "Paused"
+                  : "Off. Prepares applications for your best matches every day."
+              }
+            />
+            <div className="px-5 pb-5">
+              {autopilot.isPending ? (
+                <Skeleton className="h-12" />
+              ) : campaign ? (
+                <p className="text-app-ink-2">
+                  <span className="font-mono text-2xl text-app-ink">{autopilot.data!.today.prepared}</span> of{" "}
+                  <span className="font-mono">{campaign.daily_limit}</span> prepared today
+                </p>
+              ) : null}
+              <ButtonLink href="/auto-apply" variant={campaign ? "secondary" : "accent"} className="mt-3 w-full">
+                <Rocket className="size-4" aria-hidden="true" />
+                {campaign ? "Manage auto-apply" : "Turn on auto-apply"}
+              </ButtonLink>
+            </div>
+          </Card>
+
           <Card as="section" aria-labelledby="review-card">
             <CardHeader id="review-card" title="Waiting for your review" />
             <div className="px-5 pb-5">
@@ -174,28 +237,24 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          <Card as="section" aria-labelledby="autopilot-card">
-            <CardHeader
-              id="autopilot-card"
-              title="Autopilot"
-              description="Prepares applications for your best matches every day."
-              action={<Badge>Coming soon</Badge>}
-            />
-            <div className="px-5 pb-5">
-              <div className="flex items-center gap-2 text-app-ink-2">
-                <Rocket className="size-4" aria-hidden="true" />
-                {o?.can_start_autopilot
-                  ? "Your profile is ready for Autopilot."
-                  : "Complete your profile to 80% to be ready for Autopilot."}
+          {(followUps.data?.due.length ?? 0) > 0 && (
+            <Card as="section" aria-labelledby="fu-card">
+              <CardHeader id="fu-card" title="Follow-ups due" />
+              <ul className="flex flex-col gap-2 px-5 pb-3">
+                {followUps.data!.due.slice(0, 3).map((a) => (
+                  <li key={a.id} className="text-app-ink-2">
+                    {a.job_title} <span className="text-app-muted">· {a.company_name} · {formatDate(a.follow_up_at)}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="px-5 pb-5">
+                <ButtonLink href="/follow-ups" variant="secondary" className="w-full">
+                  <BellRing className="size-4" aria-hidden="true" />
+                  Draft follow-ups
+                </ButtonLink>
               </div>
-              {o && (
-                <p className="mt-2 text-xs text-app-muted">
-                  Daily limit: <span className="font-mono">{o.credits.daily_remaining}</span> of{" "}
-                  <span className="font-mono">{o.credits.daily_limit}</span> applications left today
-                </p>
-              )}
-            </div>
-          </Card>
+            </Card>
+          )}
 
           <Card as="section" aria-labelledby="funnel-card">
             <CardHeader id="funnel-card" title="Your funnel" description="From match to offer." />
@@ -214,7 +273,7 @@ export default function DashboardPage() {
                           <span className="text-app-ink-2">{FUNNEL_LABEL[s.stage] ?? humanize(s.stage)}</span>
                           <span className="font-mono">{s.count}</span>
                         </div>
-                        <div className="mt-1 h-1.5 rounded-full bg-app-panel overflow-hidden" aria-hidden="true">
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-app-panel" aria-hidden="true">
                           <div className="h-full rounded-full bg-app-accent" style={{ width: `${(s.count / max) * 100}%` }} />
                         </div>
                       </li>

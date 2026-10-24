@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
-from packages.ai.client import gemini_client
+from packages.ai.client import AIUnavailableError, gemini_client
 from packages.ai.schemas import ParsedResumeOutput
 from packages.core.config import settings
 from packages.core.models.preferences import JobPreference
@@ -37,21 +37,54 @@ class ResumeTextPayload(BaseModel):
 
 async def _parse_resume_text(raw_text: str) -> dict[str, Any]:
     """AI parse when a Gemini key is configured; otherwise a rule-based parse of the real text."""
-    if not gemini_client.api_key or gemini_client.api_key.startswith(("mock-", "test-")):
-        return heuristic_parse(raw_text)
-    parsed_output = await gemini_client.generate_structured(
-        model_name=settings.gemini_model_smart,
-        system_instruction=(
-            "You are an expert resume parser for Indian and international tech talent. "
-            "Extract candidate personal info, categorized skills, and work experiences with quantifiable metrics. "
-            "Give every experience bullet a unique id (b1, b2, ...). "
-            "Do NOT hallucinate facts not present in the text."
-        ),
-        prompt=raw_text,
-        response_model=ParsedResumeOutput,
-        prompt_version="v1",
-    )
-    return parsed_output.model_dump()
+    if gemini_client.is_mock:
+        return _tidy(heuristic_parse(raw_text))
+    try:
+        parsed_output = await gemini_client.generate_structured(
+            model_name=settings.gemini_model_smart,
+            system_instruction=(
+                "You are an expert resume parser for Indian and international tech talent. "
+                "Extract candidate personal info, categorized skills, and work experiences with quantifiable metrics. "
+                "Give every experience bullet a unique id (b1, b2, ...). "
+                "Do NOT hallucinate facts not present in the text."
+            ),
+            prompt=raw_text,
+            response_model=ParsedResumeOutput,
+            prompt_version="v1",
+        )
+    except AIUnavailableError:
+        # Never block onboarding on the AI provider: read the real text with rules instead.
+        return _tidy(heuristic_parse(raw_text))
+    return _sanity_check(parsed_output.model_dump(), raw_text)
+
+
+def _sanity_check(parsed: dict[str, Any], raw_text: str) -> dict[str, Any]:
+    """Guard against degenerate AI output: impossible numbers and sections dropped by the model.
+
+    Any section the AI left empty but the rule-based parser found is taken from the rules,
+    so the user never loses data that is visibly in their resume.
+    """
+    rules = heuristic_parse(raw_text)
+    months = parsed.get("total_experience_months") or 0
+    if not isinstance(months, int) or months < 0 or months > 600:
+        parsed["total_experience_months"] = 0
+    for key in ("experiences", "educations", "skills"):
+        if not parsed.get(key) and rules.get(key):
+            parsed[key] = rules[key]
+    for key in ("full_name", "email", "phone", "city", "headline", "summary", "current_title", "current_company"):
+        if not parsed.get(key) and rules.get(key):
+            parsed[key] = rules[key]
+    parsed["links"] = {**rules.get("links", {}), **(parsed.get("links") or {})}
+    return _tidy(parsed)
+
+
+def _tidy(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Small cleanups both parsers need, e.g. a grade repeated inside the institution name."""
+    for ed in parsed.get("educations") or []:
+        grade, inst = (ed.get("grade") or "").strip(), ed.get("institution") or ""
+        if grade and grade in inst:
+            ed["institution"] = inst.replace(grade, "").strip(" ,-|·")
+    return parsed
 
 
 async def _store_parsed_resume(
@@ -204,6 +237,7 @@ async def confirm_resume_profile(
             current_title=data.get("current_title", ""),
             current_company=data.get("current_company", ""),
             total_experience_months=data.get("total_experience_months", 0),
+            links=data.get("links") or {},
         )
         db.add(profile)
     else:
@@ -211,6 +245,10 @@ async def confirm_resume_profile(
         profile.phone = data.get("phone", profile.phone)
         profile.city = data.get("city", profile.city)
         profile.summary = data.get("summary", profile.summary)
+        profile.headline = data.get("headline") or profile.headline
+        profile.current_title = data.get("current_title") or profile.current_title
+        profile.current_company = data.get("current_company") or profile.current_company
+        profile.links = {**(profile.links or {}), **(data.get("links") or {})}
 
     # Confirming a resume replaces the previous resume-derived sections instead of duplicating them
     for model in (Experience, Education, Skill):

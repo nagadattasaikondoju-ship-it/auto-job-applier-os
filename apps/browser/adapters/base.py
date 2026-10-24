@@ -43,6 +43,14 @@ class BaseAtsAdapter:
                 return blocker_type
         return None
 
+    async def fill_fields_playwright(self, page: Any, fields: list[dict[str, Any]]) -> int:
+        """Fill the form on a Playwright page; returns how many fields were filled."""
+        raise NotImplementedError
+
+    async def submit_playwright(self, page: Any) -> bool:
+        """Click the form's submit button; returns whether a click happened."""
+        raise NotImplementedError
+
     def match_element_for_field(self, field: dict[str, Any], page_elements: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Helper to match field with page elements by selector or label."""
         field_id = field.get("field_id", "").lower()

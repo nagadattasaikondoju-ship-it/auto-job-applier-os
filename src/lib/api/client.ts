@@ -96,6 +96,27 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
   return data as T;
 }
 
+/** Upload a file as multipart/form-data (field name "file"). */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path), { method: "POST", headers: await authHeaders(), body: form });
+  } catch {
+    throw new ApiError(0, "NETWORK_ERROR", "Can't reach the Applyon API. Is the backend running?");
+  }
+  const text = await res.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!res.ok) throw toApiError(res.status, data as ApiErrorBody | null);
+  return data as T;
+}
+
 /** Download a protected file (e.g. a resume PDF) and hand it to the browser. */
 export async function downloadFile(path: string, filename: string) {
   const res = await fetch(buildUrl(path), { headers: await authHeaders() });

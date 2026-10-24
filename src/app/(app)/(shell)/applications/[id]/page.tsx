@@ -133,6 +133,20 @@ export default function ApplicationDetailPage() {
             </form>
           </Card>
 
+          <Card as="section" aria-labelledby="followup-title" className="p-5">
+            <h2 id="followup-title" className="font-medium">
+              Follow-up
+            </h2>
+            <p className="mt-1 text-app-muted">
+              {a.follow_up_at ? `Reminder on ${formatDateTime(a.follow_up_at)}.` : "No follow-up scheduled."}
+            </p>
+            {a.follow_up_at && (
+              <ButtonLink href="/follow-ups" variant="secondary" size="sm" className="mt-3">
+                Draft follow-up email
+              </ButtonLink>
+            )}
+          </Card>
+
           <Card as="section" aria-labelledby="timeline-title">
             <CardHeader id="timeline-title" title="Timeline" />
             {events.length === 0 ? (

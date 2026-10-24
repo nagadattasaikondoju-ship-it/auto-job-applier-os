@@ -1,7 +1,8 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link2, Search, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -17,6 +18,7 @@ import {
   PageHeader,
   Select,
   SkeletonList,
+  Tabs,
   Textarea,
 } from "@/components/app/ui";
 import { api } from "@/lib/api/endpoints";
@@ -33,6 +35,30 @@ export default function JobsPage() {
   const [minScore, setMinScore] = useState("");
   const [search, setSearch] = useState("");
   const [importOpen, setImportOpen] = useState(false);
+  const [tab, setTab] = useState<"all" | "saved">("all");
+  const saved = useQuery({
+    queryKey: ["matches", { status: "saved" }],
+    queryFn: () => api.matches.list({ status: "saved", limit: 100 }),
+  });
+  const savedIds = useMemo(() => new Set((saved.data?.items ?? []).map((m) => m.job_id)), [saved.data]);
+
+  const toggleSave = useMutation({
+    mutationFn: ({ id, on }: { id: string; on: boolean }) => api.jobs.save(id, on),
+    onSuccess: (_, v) => {
+      toast.success(v.on ? "Saved." : "Removed from saved jobs.");
+      void queryClient.invalidateQueries({ queryKey: ["matches"] });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const discover = useMutation({
+    mutationFn: api.jobs.discover,
+    onSuccess: (r) => {
+      toast.success(r.message);
+      setTimeout(() => void queryClient.invalidateQueries({ queryKey: ["jobs"] }), 15_000);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const feed = useInfiniteQuery({
     queryKey: ["jobs", "feed", minScore],
@@ -53,11 +79,13 @@ export default function JobsPage() {
   });
 
   const jobs = useMemo(() => {
-    const all = feed.data?.pages.flatMap((p) => p.items) ?? [];
+    const all = (feed.data?.pages.flatMap((p) => p.items) ?? []).filter(
+      (j) => tab === "all" || savedIds.has(j.id)
+    );
     const q = search.trim().toLowerCase();
     if (!q) return all;
     return all.filter((j) => `${j.title} ${j.company} ${j.location ?? ""}`.toLowerCase().includes(q));
-  }, [feed.data, search]);
+  }, [feed.data, search, tab, savedIds]);
 
   return (
     <>
@@ -70,13 +98,32 @@ export default function JobsPage() {
               <Link2 className="size-4" aria-hidden="true" />
               Import a job
             </Button>
-            <Button onClick={() => refresh.mutate()} loading={refresh.isPending}>
+            <Button variant="secondary" onClick={() => refresh.mutate()} loading={refresh.isPending}>
               <Sparkles className="size-4" aria-hidden="true" />
-              Find new matches
+              Re-score matches
+            </Button>
+            <Button onClick={() => discover.mutate()} loading={discover.isPending}>
+              <Search className="size-4" aria-hidden="true" />
+              Find jobs now
             </Button>
           </>
         }
       />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <Tabs
+          label="Jobs list"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: "all", label: "Matched for you" },
+            { value: "saved", label: "Saved", count: savedIds.size },
+          ]}
+        />
+        <Link href="/preferences" className="text-sm text-app-ink-2 underline-offset-4 hover:underline">
+          Edit what you&apos;re looking for
+        </Link>
+      </div>
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
@@ -107,16 +154,18 @@ export default function JobsPage() {
       ) : jobs.length === 0 ? (
         <Card>
           <EmptyState
-            title={search ? "No jobs match that filter" : "No jobs yet"}
+            title={tab === "saved" ? "No saved jobs" : search ? "No jobs match that filter" : "No jobs yet"}
             description={
               search
                 ? "Try a different search, or lower the minimum fit score."
-                : "Run matching to pull in jobs for your target roles, or import a job you found yourself."
+                : tab === "saved"
+                  ? "Use the bookmark on any job to save it for later."
+                  : "Click “Find jobs now” to search job boards and career pages for your target roles, or import a job you found."
             }
             action={
-              !search && (
-                <Button onClick={() => refresh.mutate()} loading={refresh.isPending}>
-                  Find new matches
+              !search && tab === "all" && (
+                <Button onClick={() => discover.mutate()} loading={discover.isPending}>
+                  Find jobs now
                 </Button>
               )
             }
@@ -140,7 +189,9 @@ export default function JobsPage() {
                     score: j.match?.score,
                     decision: j.match?.decision,
                     fit_reasons: j.match?.fit_reasons,
+                    saved: savedIds.has(j.id),
                   }}
+                  onToggleSave={(on) => toggleSave.mutate({ id: j.id, on })}
                 />
               </li>
             ))}

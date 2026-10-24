@@ -176,7 +176,7 @@ export function PricingCard({
         <FadeUp delay={0.3}>
           <div className="mt-5">
             <a
-              href="#hero"
+              href="/signup"
               className={cn(
                 "w-full inline-flex items-center justify-center rounded-full font-body text-xs sm:text-sm font-medium h-9 sm:h-10 px-4 transition-all duration-200 cursor-pointer shadow-xs hover:scale-[1.02]",
                 plan.featured
@@ -324,7 +324,7 @@ export function PricingSection() {
 
             <div className="shrink-0">
               <a
-                href="#hero"
+                href="/billing"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-accent hover:bg-accent/90 text-white font-medium text-sm transition-transform hover:scale-105 shadow-md cursor-pointer"
               >
                 <Sparkles className="w-4 h-4 text-amber-300" />
@@ -369,7 +369,7 @@ export function PricingSection() {
                 <div className="mt-4 pt-3 border-t border-white/10 flex items-baseline justify-between">
                   <div className="text-2xl font-bold text-white">₹{pack.price}</div>
                   <a
-                    href="#hero"
+                    href="/billing"
                     className="text-xs text-accent font-semibold hover:underline"
                   >
                     Add pack →

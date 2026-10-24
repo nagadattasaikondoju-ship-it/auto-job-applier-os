@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   Play,
@@ -10,31 +10,11 @@ import {
   CheckCircle2,
   Plus,
   MoreVertical,
-  Check,
   ArrowRight,
 } from "lucide-react";
-import { submitToWaitlist } from "@/lib/waitlist";
 import { landingContent } from "@/content/landing";
 
 export function HeroSection() {
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [feedback, setFeedback] = useState("");
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !email.includes("@")) {
-      setFeedback("Please enter a valid email address.");
-      return;
-    }
-    setLoading(true);
-    const res = await submitToWaitlist(email, "hero");
-    setLoading(false);
-    setSubmitted(true);
-    setFeedback(res.message);
-  };
-
   return (
     <section
       id="hero"
@@ -97,68 +77,30 @@ export function HeroSection() {
             {landingContent.hero.subtext}
           </motion.p>
 
-          {/* 4. CTA Buttons & Waitlist Form */}
+          {/* 4. Primary call to action: start the apply flow */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.3 }}
-            className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md"
+            className="mt-7 flex flex-col items-center gap-3"
           >
-            {!submitted ? (
-              <form
-                onSubmit={handleSubmit}
-                aria-label="Waitlist email submission"
-                className="flex items-center gap-2 p-1.5 rounded-full bg-background/95 border border-border shadow-md w-full backdrop-blur-md"
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Link
+                href="/signup"
+                className="rounded-full px-7 py-3.5 text-base font-medium font-body bg-foreground text-background hover:opacity-90 transition-opacity flex items-center gap-2 shadow-md"
               >
-                <label htmlFor="hero-email-input" className="sr-only">
-                  Email address
-                </label>
-                <input
-                  id="hero-email-input"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  suppressHydrationWarning
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder={landingContent.hero.inputPlaceholder}
-                  className="flex-1 bg-transparent px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden"
-                />
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="rounded-full px-5 py-2.5 text-sm font-medium font-body bg-foreground text-background hover:opacity-90 transition-opacity flex items-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
-                >
-                  {loading ? (
-                    <span className="animate-spin text-xs">●</span>
-                  ) : (
-                    <>
-                      <span>{landingContent.hero.cta}</span>
-                      <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-                    </>
-                  )}
-                </button>
-              </form>
-            ) : (
-              <div
-                role="status"
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-sm font-medium animate-in fade-in"
+                <span>{landingContent.hero.cta}</span>
+                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+              </Link>
+              <a
+                href="#how-it-works"
+                className="rounded-full px-6 py-3.5 text-sm font-medium font-body bg-background/90 border border-border text-foreground hover:bg-background transition-colors flex items-center gap-2 backdrop-blur-md"
               >
-                <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-                <span>{feedback}</span>
-              </div>
-            )}
-
-            {/* Play Button */}
-            <a
-              href="#how-it-works"
-              title="Watch preview"
-              aria-label="Watch how Applyon works"
-              className="h-11 w-11 rounded-full border-0 bg-background shadow-[0_2px_12px_rgba(0,0,0,0.08)] hover:bg-background/80 flex items-center justify-center shrink-0 transition-transform hover:scale-105 cursor-pointer"
-            >
-              <Play className="h-4 w-4 fill-foreground text-foreground ml-0.5" aria-hidden="true" />
-            </a>
+                <Play className="h-3.5 w-3.5 fill-foreground" aria-hidden="true" />
+                <span>{landingContent.hero.secondaryCta}</span>
+              </a>
+            </div>
+            <p className="text-xs sm:text-sm text-muted-foreground max-w-md">{landingContent.hero.note}</p>
           </motion.div>
         </div>
 

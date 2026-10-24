@@ -309,13 +309,26 @@ export interface ResumeVersion {
   content: Record<string, unknown> | null;
   status?: string;
   pdf_url: string;
-  created_at?: string;
+  docx_url?: string;
+  created_at?: string | null;
+  ats?: AtsReport;
+}
+
+export interface CoverLetterDoc {
+  id: string;
+  text: string;
+  pdf_url: string;
 }
 
 export interface TailorResult {
   status: string;
   resume_version: ResumeVersion;
-  cover_letter: { id: string; text: string; pdf_path: string | null } | null;
+  cover_letter: CoverLetterDoc | null;
+}
+
+export interface JobDocuments {
+  resume_version: ResumeVersion | null;
+  cover_letter: CoverLetterDoc | null;
 }
 
 // ---------- Applications ----------
@@ -329,9 +342,14 @@ export interface ApplicationListItem {
   salary_max_lpa: number | null;
   status: ApplicationStatus;
   channel: string;
+  source: string | null;
+  match_score: number | null;
+  resume_version_id: string | null;
   application_url: string | null;
   submitted_at: string | null;
+  follow_up_at: string | null;
   created_at: string;
+  updated_at: string | null;
 }
 
 export interface Paginated<T> {
@@ -370,6 +388,8 @@ export interface ApplicationDetail {
   submitted_at: string | null;
   created_at: string;
   failure_reason: string | null;
+  follow_up_at: string | null;
+  resume_version_id: string | null;
   job: {
     id: string;
     title: string;
@@ -424,7 +444,7 @@ export interface CreditBalance {
   ai_credits: CreditBucket;
   plan: string;
   plan_name: string;
-  daily_limit: { limit?: number; used?: number; remaining?: number; [key: string]: unknown } | number;
+  daily_limit: { can_apply: boolean; count_today: number; daily_limit: number; remaining_today: number };
 }
 
 export interface LedgerEntry {
@@ -506,4 +526,152 @@ export interface TaskStatus {
   progress: number;
   result_ref: string | null;
   error: string | null;
+}
+
+// ---------- ATS optimizer ----------
+export type IssueSeverity = "high" | "medium" | "low";
+
+export interface AtsIssue {
+  severity: IssueSeverity;
+  title: string;
+  detail: string;
+  fix: string;
+  category: string;
+}
+
+export interface AtsCategory {
+  key: string;
+  label: string;
+  score: number;
+  max: number;
+  source?: string;
+}
+
+export interface AtsReport {
+  score: number;
+  grade: "excellent" | "good" | "fair" | "needs_work";
+  categories: AtsCategory[];
+  issues: AtsIssue[];
+  keywords: { matched: string[]; missing: string[]; source: "job_description" | "general" };
+  weak_bullets: { text: string; reason: string }[];
+  stats: { word_count: number; bullet_count: number; sections_found: string[] };
+  source?: "upload" | "profile";
+}
+
+export interface BulletSuggestion {
+  experience_id: string;
+  bullet_id: string;
+  original: string;
+  rewritten: string | null;
+  reason: string;
+  blocked_reason: string | null;
+}
+
+export interface RewriteResult {
+  ai_available: boolean;
+  suggestions: BulletSuggestion[];
+}
+
+export interface ApplyAtsResult {
+  resume_version_id: string;
+  version_no: number;
+  changes: string[];
+  rejected: { bullet_id: string; reason: string }[];
+  ats: AtsReport;
+}
+
+export interface UploadResumeResult extends ResumeUploadResult {
+  ats: AtsReport;
+}
+
+export interface ResumeVersionListItem {
+  id: string;
+  job_id: string | null;
+  job_title: string | null;
+  company: string | null;
+  kind: "tailored" | "optimized";
+  version_no: number;
+  truth_check_status: string;
+  status: string;
+  created_at: string | null;
+}
+
+// ---------- Preferences ----------
+export type Seniority = "intern" | "fresher" | "junior" | "mid" | "senior" | "lead";
+export type WorkMode = "remote" | "hybrid" | "onsite";
+export type ApplyMode = "review" | "hybrid";
+
+export interface Preferences {
+  exists?: boolean;
+  target_roles: string[];
+  role_keywords: string[];
+  industries: string[];
+  seniority: Seniority;
+  locations: string[];
+  remote_mode: WorkMode[];
+  min_salary_lpa: number;
+  company_size: string[];
+  excluded_companies: string[];
+  excluded_keywords: string[];
+  employment_types: string[];
+  visa_sponsorship_needed: boolean;
+  daily_application_limit: number;
+  min_match_score: number;
+  apply_mode: ApplyMode;
+  notice_period_days: number | null;
+  current_ctc_lpa: number | null;
+  expected_ctc_lpa: number | null;
+  willing_to_relocate: boolean | null;
+}
+
+// ---------- Autopilot ----------
+export interface Readiness {
+  mode: ApplyMode;
+  can_start: boolean;
+  blockers: string[];
+  profile_score: number;
+  has_preferences: boolean;
+  consents: Record<string, boolean>;
+  plan: string;
+  plan_daily_limit: number;
+  auto_submit_allowed: boolean;
+}
+
+export interface Campaign {
+  id: string;
+  mode: ApplyMode;
+  status: "active" | "paused" | "stopped";
+  daily_limit: number;
+  min_match_score: number | null;
+  hybrid_threshold: number;
+  started_at: string | null;
+  paused_reason: string | null;
+}
+
+export interface AutopilotState {
+  campaign: Campaign | null;
+  readiness: { review: Readiness; hybrid: Readiness };
+  today: { prepared: number; limit: number; by_status: Record<string, number> };
+  activity: {
+    id: string;
+    job_id: string;
+    job_title: string;
+    company_name: string;
+    status: ApplicationStatus;
+    failure_reason: string | null;
+    updated_at: string | null;
+  }[];
+  current_mode: ApplyMode;
+}
+
+export interface BatchResult {
+  prepared: number;
+  stopped_reason: string | null;
+}
+
+// ---------- Follow-ups ----------
+export interface FollowUpDraft {
+  subject: string;
+  body: string;
+  ai: boolean;
 }

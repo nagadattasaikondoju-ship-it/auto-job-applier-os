@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
-from packages.ai.client import gemini_client
+from packages.ai.client import AIUnavailableError, gemini_client
 from packages.ai.schemas import BulletRewriteOutput
 from packages.core.config import settings
 from packages.core.models.jobs import Job
@@ -56,8 +56,24 @@ class ApplyRequest(BaseModel):
 
 
 def _ai_available() -> bool:
-    key = gemini_client.api_key
-    return bool(key) and not key.startswith(("mock-", "test-"))
+    return not gemini_client.is_mock
+
+
+def _tips(targets: list["BulletRef"]) -> dict[str, Any]:
+    return {
+        "ai_available": False,
+        "suggestions": [
+            {
+                "experience_id": t.experience_id,
+                "bullet_id": t.bullet_id,
+                "original": t.text,
+                "rewritten": None,
+                "reason": "Start with an action verb and add a real, measurable result if you have one.",
+                "blocked_reason": None,
+            }
+            for t in targets
+        ],
+    }
 
 
 def _bullet_id(exp: Experience, index: int, bullet: Any) -> str:
@@ -164,37 +180,27 @@ async def rewrite_bullets(
         return {"ai_available": _ai_available(), "suggestions": []}
 
     if not _ai_available():
-        return {
-            "ai_available": False,
-            "suggestions": [
-                {
-                    "experience_id": t.experience_id,
-                    "bullet_id": t.bullet_id,
-                    "original": t.text,
-                    "rewritten": None,
-                    "reason": "Start with an action verb and add a real, measurable result if you have one.",
-                    "blocked_reason": None,
-                }
-                for t in targets
-            ],
-        }
+        return _tips(targets)
 
     jd = await _jd_text(db, body.job_id, body.jd_text)
     listing = "\n".join(f"[{t.bullet_id}] {t.text}" for t in targets)
-    result: BulletRewriteOutput = await gemini_client.generate_structured(
-        model_name=settings.gemini_model_fast,
-        system_instruction=(
-            "You rewrite resume bullets to be ATS-friendly: start with a strong action verb, be specific, "
-            "15-30 words. Use ONLY facts in the original bullet. Never add numbers, tools, companies, "
-            "team sizes or results that are not in the original. If the original has no number, do not invent one."
-        ),
-        prompt=(
-            (f"Target job:\n{jd[:1500]}\n\n" if jd else "")
-            + f"Rewrite each bullet. Keep the id in brackets.\n{listing}"
-        ),
-        response_model=BulletRewriteOutput,
-        prompt_version="v1_bullet_rewrite",
-    )
+    try:
+        result: BulletRewriteOutput = await gemini_client.generate_structured(
+            model_name=settings.gemini_model_fast,
+            system_instruction=(
+                "You rewrite resume bullets to be ATS-friendly: start with a strong action verb, be specific, "
+                "15-30 words. Use ONLY facts in the original bullet. Never add numbers, tools, companies, "
+                "team sizes or results that are not in the original. If the original has no number, do not invent one."
+            ),
+            prompt=(
+                (f"Target job:\n{jd[:1500]}\n\n" if jd else "")
+                + f"Rewrite each bullet. Keep the id in brackets.\n{listing}"
+            ),
+            response_model=BulletRewriteOutput,
+            prompt_version="v1_bullet_rewrite",
+        )
+    except AIUnavailableError:
+        return _tips(targets)
     by_id = {r.bullet_id: r for r in result.rewrites}
     suggestions = []
     for t in targets:

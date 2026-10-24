@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
+from packages.ai.client import AIUnavailableError
 from packages.core.models.jobs import Company, Job
 from packages.core.models.matching import CoverLetter, ResumeVersion
 from packages.core.models.profile import ProfileVersion
@@ -17,6 +18,7 @@ from packages.core.services.ats import analyze_resume
 from packages.documents.export import (
     build_resume_document,
     cover_letter_pdf_bytes,
+    document_text,
     resume_docx_bytes,
     resume_pdf_bytes,
 )
@@ -26,6 +28,16 @@ from packages.documents.tailor import generate_cover_letter, tailor_resume_for_j
 router = APIRouter(tags=["Documents"])
 
 Tone = Literal["professional", "friendly", "direct"]
+
+
+def _ai_down() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "AI_UNAVAILABLE",
+            "message": "The AI service isn't responding right now, so we couldn't write this. Please try again in a minute.",
+        },
+    )
 
 
 def _version_dict(ver: ResumeVersion) -> dict[str, Any]:
@@ -41,15 +53,6 @@ def _version_dict(ver: ResumeVersion) -> dict[str, Any]:
         "docx_url": f"/v1/resume-versions/{ver.id}/docx",
         "created_at": ver.created_at.isoformat() if ver.created_at else None,
     }
-
-
-def _resume_text(content: dict[str, Any]) -> str:
-    """Plain text of a tailored/optimized resume, for ATS scoring."""
-    parts = [content.get("summary") or "", "Skills", ", ".join(content.get("skills_ordered") or []), "Experience"]
-    for e in content.get("experiences") or []:
-        parts.append(f"{e.get('title', '')} - {e.get('company', '')}")
-        parts.extend("- " + b.get("text", "") for b in e.get("bullets") or [])
-    return "\n".join(parts)
 
 
 async def _job_jd(session: AsyncSession, job_id: uuid.UUID | None) -> str | None:
@@ -96,6 +99,8 @@ async def tailor_documents_for_job(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except AIUnavailableError as e:
+        raise _ai_down() from e
 
     cl_data = None
     if include_cover_letter:
@@ -111,7 +116,9 @@ async def tailor_documents_for_job(
             cl_data = None
 
     data = _version_dict(resume_ver)
-    data["ats"] = analyze_resume(_resume_text(resume_ver.content_json), jd_text=await _job_jd(session, job_id))
+    data["ats"] = analyze_resume(
+        document_text(await _printable(session, resume_ver)), jd_text=await _job_jd(session, job_id)
+    )
     return {"status": "ready", "resume_version": data, "cover_letter": cl_data}
 
 
@@ -127,6 +134,8 @@ async def regenerate_cover_letter(
         cl = await generate_cover_letter(session=session, user_id=current_user.user_id, job_id=job_id, tone=tone)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except AIUnavailableError as e:
+        raise _ai_down() from e
     return {"id": str(cl.id), "text": cl.content_text, "pdf_url": f"/v1/cover-letters/{cl.id}/pdf"}
 
 
@@ -157,7 +166,9 @@ async def get_job_documents(
     resume_data = None
     if ver:
         resume_data = _version_dict(ver)
-        resume_data["ats"] = analyze_resume(_resume_text(ver.content_json), jd_text=await _job_jd(session, job_id))
+        resume_data["ats"] = analyze_resume(
+            document_text(await _printable(session, ver)), jd_text=await _job_jd(session, job_id)
+        )
     return {
         "resume_version": resume_data,
         "cover_letter": (

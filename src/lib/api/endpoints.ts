@@ -1,6 +1,19 @@
-import { apiRequest, downloadFile, downloadJson } from "./client";
+import { apiRequest, apiUpload, downloadFile, downloadJson } from "./client";
 import type {
   AnalyticsOverview,
+  ApplyAtsResult,
+  ApplyMode,
+  AtsReport,
+  AutopilotState,
+  BatchResult,
+  Campaign,
+  CoverLetterDoc,
+  FollowUpDraft,
+  JobDocuments,
+  Preferences,
+  ResumeVersionListItem,
+  RewriteResult,
+  UploadResumeResult,
   Answer,
   AnswerUpsert,
   ApplicationDetail,
@@ -28,7 +41,6 @@ import type {
   ProfileUpdate,
   RefreshMatchesResult,
   ResumeConfirmResult,
-  ResumeUploadResult,
   ResumeVersion,
   SkillCreate,
   TailorResult,
@@ -53,7 +65,8 @@ export const api = {
 
   resumes: {
     upload: (raw_text: string, filename: string) =>
-      apiRequest<ResumeUploadResult>("/v1/resumes", { method: "POST", body: { raw_text, filename } }),
+      apiRequest<UploadResumeResult>("/v1/resumes", { method: "POST", body: { raw_text, filename } }),
+    uploadFile: (file: File) => apiUpload<UploadResumeResult>("/v1/resumes/upload", file),
     confirm: (id: string) => apiRequest<ResumeConfirmResult>(`/v1/resumes/${id}/confirm`, { method: "POST" }),
   },
 
@@ -65,6 +78,7 @@ export const api = {
   },
 
   consents: {
+    get: () => apiRequest<{ consents: Record<ConsentPurpose, boolean> }>("/v1/consents"),
     set: (purpose: ConsentPurpose, granted: boolean) =>
       apiRequest<{ status: string }>("/v1/consents", { method: "POST", body: { purpose, granted, version: "v1" } }),
   },
@@ -77,11 +91,17 @@ export const api = {
       apiRequest<JobImportResult>("/v1/jobs/import", { method: "POST", body: { url, optional_text } }),
     feedback: (id: string, feedback: JobFeedback, reason?: string) =>
       apiRequest<{ status: string }>(`/v1/jobs/${id}/feedback`, { method: "POST", body: { feedback, reason } }),
-    tailor: (id: string, includeCoverLetter = true) =>
+    tailor: (id: string, includeCoverLetter = true, tone: "professional" | "friendly" | "direct" = "professional") =>
       apiRequest<TailorResult>(`/v1/jobs/${id}/tailor`, {
         method: "POST",
-        query: { include_cover_letter: includeCoverLetter },
+        query: { include_cover_letter: includeCoverLetter, tone },
       }),
+    coverLetter: (id: string, tone: "professional" | "friendly" | "direct") =>
+      apiRequest<CoverLetterDoc>(`/v1/jobs/${id}/cover-letter`, { method: "POST", query: { tone } }),
+    documents: (id: string) => apiRequest<JobDocuments>(`/v1/jobs/${id}/documents`),
+    save: (id: string, saved: boolean) =>
+      apiRequest<{ saved: boolean }>(`/v1/jobs/${id}/save`, { method: "POST", query: { saved } }),
+    discover: () => apiRequest<{ status: string; message: string }>("/v1/jobs/discover", { method: "POST" }),
   },
 
   matches: {
@@ -92,8 +112,39 @@ export const api = {
 
   documents: {
     resumeVersion: (id: string) => apiRequest<ResumeVersion>(`/v1/resume-versions/${id}`),
-    downloadResumePdf: (id: string, filename = "Applyon_Resume.pdf") =>
-      downloadFile(`/v1/resume-versions/${id}/pdf`, filename),
+    resumeVersions: () => apiRequest<{ items: ResumeVersionListItem[] }>("/v1/resume-versions"),
+    downloadResumePdf: (id: string, filename = "Resume.pdf") => downloadFile(`/v1/resume-versions/${id}/pdf`, filename),
+    downloadResumeDocx: (id: string, filename = "Resume.docx") =>
+      downloadFile(`/v1/resume-versions/${id}/docx`, filename),
+    downloadCoverLetterPdf: (id: string) => downloadFile(`/v1/cover-letters/${id}/pdf`, "Cover_Letter.pdf"),
+  },
+
+  ats: {
+    scan: (body: { resume_id?: string; use_profile?: boolean; job_id?: string; jd_text?: string }) =>
+      apiRequest<AtsReport>("/v1/ats/scan", { method: "POST", body }),
+    rewriteBullets: (body: { job_id?: string; jd_text?: string } = {}) =>
+      apiRequest<RewriteResult>("/v1/ats/rewrite-bullets", { method: "POST", body }),
+    apply: (body: {
+      bullet_updates: { experience_id: string; bullet_id: string; text: string }[];
+      summary?: string;
+      add_skills?: string[];
+    }) => apiRequest<ApplyAtsResult>("/v1/ats/apply", { method: "POST", body }),
+  },
+
+  preferences: {
+    get: () => apiRequest<Preferences>("/v1/preferences"),
+    save: (body: Omit<Preferences, "exists">) => apiRequest<Preferences>("/v1/preferences", { method: "PUT", body }),
+  },
+
+  autopilot: {
+    get: () => apiRequest<AutopilotState>("/v1/autopilot"),
+    start: (body: { mode: ApplyMode; daily_limit: number; min_match_score?: number; hybrid_threshold?: number }) =>
+      apiRequest<{ campaign: Campaign; first_batch: BatchResult }>("/v1/autopilot/start", { method: "POST", body }),
+    pause: () => apiRequest<{ campaign: Campaign }>("/v1/autopilot/pause", { method: "POST" }),
+    resume: () => apiRequest<{ campaign: Campaign }>("/v1/autopilot/resume", { method: "POST" }),
+    runNow: () => apiRequest<BatchResult>("/v1/autopilot/run-now", { method: "POST" }),
+    retry: (applicationId: string) =>
+      apiRequest<{ status: string }>(`/v1/autopilot/retry/${applicationId}`, { method: "POST" }),
   },
 
   applications: {
@@ -108,12 +159,26 @@ export const api = {
         body: { status, notes },
       }),
     withdraw: (id: string) => apiRequest<void>(`/v1/applications/${id}`, { method: "DELETE" }),
+    exportCsv: () => downloadFile("/v1/applications/export.csv", "applyon-applications.csv"),
+    followUps: () =>
+      apiRequest<{ due: ApplicationListItem[]; upcoming: ApplicationListItem[] }>("/v1/applications/follow-ups"),
+    draftFollowUp: (id: string, tone: "professional" | "friendly" | "direct" = "professional") =>
+      apiRequest<FollowUpDraft>(`/v1/applications/${id}/follow-up/draft`, { method: "POST", body: { tone } }),
+    followUpSent: (id: string) =>
+      apiRequest<{ follow_up_at: string | null }>(`/v1/applications/${id}/follow-up/sent`, { method: "POST" }),
+    setFollowUp: (id: string, follow_up_at: string | null) =>
+      apiRequest<{ follow_up_at: string | null }>(`/v1/applications/${id}/follow-up`, {
+        method: "PATCH",
+        body: { follow_up_at },
+      }),
   },
 
   reviewQueue: {
     list: (page = 1) => apiRequest<Paginated<ApplicationDetail>>("/v1/review-queue", { query: { page } }),
     approve: (id: string) =>
-      apiRequest<{ status: string }>(`/v1/review-queue/applications/${id}/approve`, { method: "POST" }),
+      apiRequest<{ status: string; submission_queued: boolean }>(`/v1/review-queue/applications/${id}/approve`, {
+        method: "POST",
+      }),
     reject: (id: string) =>
       apiRequest<{ status: string }>(`/v1/review-queue/applications/${id}/reject`, { method: "POST" }),
     editAnswer: (id: string, field_id: string, new_value: unknown, save_to_answer_bank: boolean) =>

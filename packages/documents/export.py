@@ -262,3 +262,17 @@ def cover_letter_pdf_bytes(name: str, contact: list[str], body: str) -> bytes:
         pdf.para(para, 10.5)
         pdf.ln(2)
     return bytes(pdf.output())
+
+
+def document_text(doc: dict[str, Any]) -> str:
+    """Plain text of a printable resume, in the same order as the PDF, for ATS scoring."""
+    lines = [doc["name"], doc["headline"], " | ".join(doc["contact"]), "Summary", doc["summary"], "Skills", ", ".join(doc["skills"]), "Experience"]
+    for e in doc["experiences"]:
+        lines.append(f"{e['title']}, {e['company']} ({e['dates']})")
+        lines.extend(f"- {b}" for b in e["bullets"])
+    if doc["projects"]:
+        lines.append("Projects")
+        lines.extend(f"{p['title']}: {p['description']}" for p in doc["projects"])
+    lines.append("Education")
+    lines.extend(f"{e['line']}, {e['institution']} {e['dates']} {e['grade']}".strip() for e in doc["educations"])
+    return "\n".join(line for line in lines if line)

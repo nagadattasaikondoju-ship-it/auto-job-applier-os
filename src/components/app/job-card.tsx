@@ -1,4 +1,6 @@
-import { Building2, Clock, MapPin } from "lucide-react";
+"use client";
+
+import { Bookmark, BookmarkCheck, Building2, Clock, MapPin } from "lucide-react";
 import Link from "next/link";
 import { formatSalary, humanize, timeAgo } from "@/lib/format";
 import { Badge, Card, ScoreRing } from "./ui";
@@ -15,9 +17,10 @@ export interface JobCardData {
   score?: number | null;
   decision?: string | null;
   fit_reasons?: string[];
+  saved?: boolean;
 }
 
-export function JobCard({ job }: { job: JobCardData }) {
+export function JobCard({ job, onToggleSave }: { job: JobCardData; onToggleSave?: (saved: boolean) => void }) {
   const salary = formatSalary(job.salary_min_lpa, job.salary_max_lpa);
   return (
     <Card as="article" className="group relative p-5 transition-colors duration-150 hover:border-app-line">
@@ -59,11 +62,24 @@ export function JobCard({ job }: { job: JobCardData }) {
             <p className="mt-3 line-clamp-2 text-app-ink-2">{job.fit_reasons.slice(0, 2).join(" · ")}</p>
           )}
         </div>
-        {typeof job.score === "number" ? (
-          <ScoreRing score={job.score} />
-        ) : (
-          <span className="text-xs text-app-subtle whitespace-nowrap">Not scored yet</span>
-        )}
+        <div className="relative z-10 flex flex-col items-end gap-2">
+          {typeof job.score === "number" && job.score > 0 ? (
+            <ScoreRing score={job.score} />
+          ) : (
+            <span className="text-xs text-app-subtle whitespace-nowrap">Not scored yet</span>
+          )}
+          {onToggleSave && (
+            <button
+              type="button"
+              onClick={() => onToggleSave(!job.saved)}
+              aria-pressed={Boolean(job.saved)}
+              aria-label={job.saved ? `Unsave ${job.title}` : `Save ${job.title}`}
+              className="inline-flex size-8 items-center justify-center rounded-app-md text-app-ink-2 hover:bg-app-panel outline-none focus-visible:ring-2 focus-visible:ring-app-accent"
+            >
+              {job.saved ? <BookmarkCheck className="size-4 text-app-accent" aria-hidden="true" /> : <Bookmark className="size-4" aria-hidden="true" />}
+            </button>
+          )}
+        </div>
       </div>
     </Card>
   );

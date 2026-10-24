@@ -92,7 +92,7 @@ def test_rewrite_verification_blocks_invented_facts() -> None:
 
 def test_heuristic_parse_reads_real_text() -> None:
     parsed = heuristic_parse(
-        "Priya Sharma\npriya@example.com | +91 98765 43210 | Pune\nExperience\n"
+        "Priya Sharma\npriya@example.com | +91 98765 43210 | Pune | linkedin.com/in/priya-s | github.com/priya\nExperience\n"
         "Frontend Engineer at Acme (Jan 2022 - Present)\n- Built a design system in React\nSkills\nReact, AWS\n"
     )
     assert parsed["full_name"] == "Priya Sharma"
@@ -102,6 +102,7 @@ def test_heuristic_parse_reads_real_text() -> None:
     assert (exp["title"], exp["company"], exp["is_current"]) == ("Frontend Engineer", "Acme", True)
     assert exp["bullets"][0]["text"] == "Built a design system in React"
     assert {"React", "AWS"} <= {s["name"] for s in parsed["skills"]}
+    assert parsed["links"] == {"linkedin": "https://linkedin.com/in/priya-s", "github": "https://github.com/priya"}
 
 
 def test_extract_text_formats() -> None:
@@ -145,6 +146,7 @@ def test_follow_up_template() -> None:
     draft = template_follow_up("Priya Sharma", "Frontend Engineer", "Razorfin", datetime(2026, 10, 1, tzinfo=UTC), "Built a design system")
     assert "Frontend Engineer" in draft["subject"]
     assert "1 October" in draft["body"] and "Razorfin" in draft["body"]
+    assert "Recently, I built a design system." in draft["body"]
     assert draft["body"].rstrip().endswith("Priya Sharma")
 
 
@@ -158,3 +160,64 @@ async def test_resume_upload_rejects_unsupported_files() -> None:
         )
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "UNSUPPORTED_RESUME"
+
+
+def test_gemini_schema_has_no_refs_or_titles() -> None:
+    import json
+
+    from packages.ai.client import to_gemini_schema
+    from packages.ai.schemas import ParsedResumeOutput, TailoredResumeOutput
+
+    def schema_keys(node: object) -> set[str]:
+        """Keywords used by schema nodes (property names are skipped)."""
+        if not isinstance(node, dict):
+            return set()
+        keys = set(node)
+        for k, v in node.items():
+            children = v.values() if k == "properties" else ([v] if isinstance(v, dict) else v if isinstance(v, list) else [])
+            for child in children:
+                keys |= schema_keys(child)
+        return keys
+
+    for model in (ParsedResumeOutput, TailoredResumeOutput):
+        converted = to_gemini_schema(model.model_json_schema())
+        assert "$ref" not in json.dumps(converted)
+        assert not schema_keys(converted) & {"$defs", "title", "default"}
+    schema = to_gemini_schema(ParsedResumeOutput.model_json_schema())
+    exp = schema["properties"]["experiences"]["items"]
+    assert exp["properties"]["end_date"]["nullable"] is True  # str | None -> nullable
+
+
+@pytest.mark.asyncio
+async def test_resume_parse_falls_back_to_rules_when_ai_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apps.api.routers import resumes
+    from packages.ai.client import AIUnavailableError, gemini_client
+
+    async def boom(**_: object) -> None:
+        raise AIUnavailableError("down")
+
+    monkeypatch.setattr(gemini_client, "api_key", "real-looking-key")
+    monkeypatch.setattr(gemini_client, "generate_structured", boom)
+    parsed = await resumes._parse_resume_text("Priya Sharma\npriya@example.com\nExperience\nEngineer at Acme (2022 - Present)\n- Built things\n")
+    assert parsed["full_name"] == "Priya Sharma"  # real text, never mock data
+
+
+def test_follow_up_highlight_skips_weak_bullets() -> None:
+    from packages.core.services.followups import pick_highlight
+
+    bullets = ["Responsible for working on the dashboard", "Built a React app", "Cut load time by 40% with caching."]
+    assert pick_highlight(bullets) == "Cut load time by 40% with caching"
+    assert pick_highlight(bullets[:2]) == "Built a React app"
+    assert pick_highlight(bullets[:1]) is None
+
+
+def test_jd_keywords_ignore_levels_and_domains() -> None:
+    r = analyze_resume(STRONG, jd_text="SDE II at HevoData.com. You will use React, Neo4J and Kafka to go live fast.")
+    assert set(r["keywords"]["missing"]) == {"Neo4J", "Kafka"}  # no "Go", "SDE", "II" or the domain
+
+
+def test_tidy_removes_grade_repeated_in_institution() -> None:
+    from apps.api.routers.resumes import _tidy
+
+    parsed = {"educations": [{"institution": "RV College of Engineering, Bengaluru 8.2 CGPA", "grade": "8.2 CGPA"}]}
+    assert _tidy(parsed)["educations"][0]["institution"] == "RV College of Engineering, Bengaluru"

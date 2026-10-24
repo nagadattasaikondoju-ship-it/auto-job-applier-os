@@ -5,11 +5,7 @@ import Link from "next/link";
 import { Sparkles, Menu, X, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface NavbarProps {
-  onOpenWaitlist?: () => void;
-}
-
-export function Navbar({ onOpenWaitlist }: NavbarProps) {
+export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -81,19 +77,13 @@ export function Navbar({ onOpenWaitlist }: NavbarProps) {
           >
             Log in
           </Link>
-          <a
-            href="#hero"
-            onClick={(e) => {
-              if (onOpenWaitlist) {
-                e.preventDefault();
-                onOpenWaitlist();
-              }
-            }}
+          <Link
+            href="/signup"
             className="rounded-full px-5 py-2 text-sm font-medium bg-foreground text-background hover:opacity-90 transition-all shadow-xs flex items-center gap-2 group cursor-pointer"
           >
-            <span>Join waitlist</span>
+            <span>Apply for jobs</span>
             <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-          </a>
+          </Link>
         </div>
 
         {/* Mobile menu trigger */}
@@ -134,14 +124,14 @@ export function Navbar({ onOpenWaitlist }: NavbarProps) {
           >
             Log in
           </Link>
-          <a
-            href="#hero"
+          <Link
+            href="/signup"
             onClick={() => setMobileMenuOpen(false)}
             className="w-full rounded-full py-3 text-sm font-medium bg-foreground text-background hover:opacity-90 transition-all text-center mt-2 flex items-center justify-center gap-2"
           >
-            <span>Join waitlist</span>
+            <span>Apply for jobs</span>
             <Sparkles className="w-4 h-4 text-amber-400" aria-hidden="true" />
-          </a>
+          </Link>
         </nav>
       )}
     </header>

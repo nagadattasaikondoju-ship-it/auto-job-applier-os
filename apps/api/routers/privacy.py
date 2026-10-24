@@ -111,20 +111,20 @@ async def export_user_data(
                 for s in skill_res.scalars().all()
             ],
             "projects": [
-                {"title": p.title, "description": p.description, "link": p.link}
+                {"title": p.title, "description": p.description, "url": p.url, "skills": p.skills}
                 for p in proj_res.scalars().all()
             ],
             "certifications": [
-                {"name": c.name, "issuer": c.issuer, "year": c.year}
+                {"name": c.name, "issuer": c.issuer, "issue_date": c.issue_date, "credential_url": c.credential_url}
                 for c in cert_res.scalars().all()
             ],
         },
         "answers": [
             {
-                "canonical_key": a.canonical_key,
-                "label": a.label,
+                "question_key": a.question_key,
+                "question_text": a.question_text,
                 "answer_text": a.answer_text,
-                "confidence": a.confidence,
+                "source": a.source,
             }
             for a in ans_res.scalars().all()
         ],

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -14,12 +15,68 @@ logger = logging.getLogger("applyon.ai")
 T = TypeVar("T", bound=BaseModel)
 
 
+class AIUnavailableError(RuntimeError):
+    """The AI provider failed (bad key, retired model, quota, network or unparseable output).
+
+    Callers must handle this explicitly; we never substitute made-up content for a real user.
+    """
+
+
+_GEMINI_SCHEMA_KEYS = {
+    "type", "format", "description", "nullable", "enum", "properties", "required",
+    "items", "minItems", "maxItems", "minimum", "maximum", "anyOf", "propertyOrdering",
+}
+
+
+def to_gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Convert a Pydantic JSON schema into Gemini's responseSchema (OpenAPI subset).
+
+    Gemini rejects $defs/$ref, titles and defaults, so refs are inlined, `X | None` becomes
+    nullable, and unsupported keys are dropped.
+    """
+    defs = schema.get("$defs", {})
+
+    def convert(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        if "$ref" in node:
+            return convert(defs[node["$ref"].split("/")[-1]])
+        if "anyOf" in node:
+            variants = [v for v in node["anyOf"] if v.get("type") != "null"]
+            nullable = len(variants) < len(node["anyOf"])
+            merged = convert(variants[0]) if len(variants) == 1 else {"anyOf": [convert(v) for v in variants]}
+            if nullable:
+                merged = {**merged, "nullable": True}
+            if "description" in node:
+                merged["description"] = node["description"]
+            return merged
+        out: dict[str, Any] = {}
+        for key, value in node.items():
+            if key not in _GEMINI_SCHEMA_KEYS:
+                continue
+            if key == "properties":
+                out[key] = {name: convert(v) for name, v in value.items()}
+            elif key == "items":
+                out[key] = convert(value)
+            else:
+                out[key] = value
+        return out
+
+    result: dict[str, Any] = convert({k: v for k, v in schema.items() if k != "$defs"})
+    return result
+
+
 class GeminiClient:
     """Production-grade client for Google Gemini with structured outputs, caching, and rate limiting."""
 
     def __init__(self) -> None:
         self.api_key = settings.gemini_api_key
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+    @property
+    def is_mock(self) -> bool:
+        """No real key configured: deterministic mock outputs (tests and offline development only)."""
+        return not self.api_key or self.api_key.startswith(("mock-", "test-"))
 
     def _get_cache_key(self, prompt_version: str, model: str, payload: dict[str, Any]) -> str:
         serialized = json.dumps(payload, sort_keys=True)
@@ -53,14 +110,13 @@ class GeminiClient:
             except Exception:
                 pass
 
-        # 2. Mock mode if key is missing/mocked in test/dev
-        if not self.api_key or self.api_key.startswith("mock-"):
+        # 2. Mock mode only when no real key is configured (tests / offline dev)
+        if self.is_mock:
             return self._generate_mock_response(response_model)
 
-        # 3. Call Google Gemini API
-        url = f"{self.base_url}/models/{model_name}:generateContent?key={self.api_key}"
-        schema = response_model.model_json_schema()
-
+        # 3. Call Google Gemini API: the requested model, one retry after a short pause when it's
+        #    overloaded or rate-limited, then the lite model as a last resort.
+        schema = to_gemini_schema(response_model.model_json_schema())
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": [{"parts": [{"text": prompt}]}],
@@ -70,16 +126,35 @@ class GeminiClient:
                 "temperature": 0.2,
             },
         }
+        attempts = [model_name, model_name]
+        if settings.gemini_model_lite not in attempts:
+            attempts.append(settings.gemini_model_lite)
 
         start_time = time.perf_counter()
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code != 200:
-                logger.error(f"Gemini API error ({resp.status_code}): {resp.text}")
-                # Fall back to structured fallback if API quota or key issues arise
-                return self._generate_mock_response(response_model)
-
-            res_json = resp.json()
+        res_json: dict[str, Any] | None = None
+        last_error = ""
+        for i, attempt_model in enumerate(attempts):
+            if i == 1:
+                await asyncio.sleep(2)
+            url = f"{self.base_url}/models/{attempt_model}:generateContent?key={self.api_key}"
+            try:
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    resp = await client.post(url, json=payload)
+            except httpx.HTTPError as e:
+                last_error = f"request to {attempt_model} failed: {type(e).__name__}"
+                logger.warning("Gemini %s", last_error)
+                continue
+            if resp.status_code == 200:
+                res_json = resp.json()
+                break
+            last_error = f"{attempt_model} returned {resp.status_code}"
+            logger.warning("Gemini %s: %s", last_error, resp.text[:300])
+            if resp.status_code not in (404, 429, 500, 503):
+                break  # bad request: retrying won't help
+            if resp.status_code == 404 and i == 0:
+                continue  # retired model: skip the same-model retry
+        if res_json is None:
+            raise AIUnavailableError(f"Gemini unavailable ({last_error})")
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         logger.debug(f"Gemini API latency: {latency_ms}ms")
@@ -95,8 +170,8 @@ class GeminiClient:
             await redis.set(cache_key, json.dumps(parsed_data), ex=cache_ttl_seconds)
             return validated
         except Exception as e:
-            logger.warning(f"Failed to parse Gemini output, attempting repair retry: {e}")
-            return self._generate_mock_response(response_model)
+            logger.warning("Failed to parse Gemini output for %s: %s", response_model.__name__, e)
+            raise AIUnavailableError("Gemini returned output that didn't match the expected format") from e
 
     async def generate_text(
         self,
@@ -104,11 +179,11 @@ class GeminiClient:
         temperature: float = 0.2,
         max_output_tokens: int = 500,
     ) -> str:
-        """Generate plain text response using Gemini Fast with mock fallback."""
-        if not self.api_key or self.api_key.startswith("mock-") or self.api_key.startswith("test-"):
-            return "I am excited to bring my technical expertise and problem-solving skills to this role."
+        """Generate plain text with the fast model. Raises AIUnavailableError on failure."""
+        if self.is_mock:
+            raise AIUnavailableError("No Gemini API key configured")
 
-        url = f"{self.base_url}/models/{settings.gemini_fast_model}:generateContent?key={self.api_key}"
+        url = f"{self.base_url}/models/{settings.gemini_model_fast}:generateContent?key={self.api_key}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -117,21 +192,20 @@ class GeminiClient:
             },
         }
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.post(url, json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        return candidates[0]["content"]["parts"][0]["text"]
+            if resp.status_code == 200:
+                candidates = resp.json().get("candidates", [])
+                if candidates:
+                    return str(candidates[0]["content"]["parts"][0]["text"])
+            logger.error("Gemini text error (%s): %s", resp.status_code, resp.text[:300])
         except Exception as e:
-            logger.warning(f"generate_text error: {e}")
-
-        return "I am excited to bring my technical expertise and problem-solving skills to this role."
+            logger.warning("generate_text error: %s", e)
+        raise AIUnavailableError("Gemini text generation failed")
 
     async def get_embedding(self, text: str) -> list[float]:
         """Generate a 768-dimensional semantic embedding vector using Gemini."""
-        if not self.api_key or self.api_key.startswith("mock-"):
+        if self.is_mock:
             # Return deterministic synthetic 768-dim vector for mock/testing
             h = hashlib.md5(text.encode()).hexdigest()
             return [float(int(h[i % len(h)], 16)) / 16.0 for i in range(768)]
