@@ -45,6 +45,12 @@ CITY_ALIASES: dict[str, list[str]] = {
 }
 
 _SENIOR_TITLE = re.compile(r"\b(senior|sr\.?|lead|principal|staff|head|director|vp|vice president|architect|manager)\b", re.I)
+# Too senior for a mid-level (3–6 years) candidate, though "Senior Engineer" is often fine
+_LEAD_TITLE = re.compile(
+    r"\b(lead|principal|staff|head|director|vp|vice president|architect|manager)\b"
+    r"|\b(sde|swe|engineer|developer)[\s\-]*(iii|iv|v|3|4|5)\b",
+    re.I,
+)
 _INTERN_TITLE = re.compile(r"\b(intern|internship|trainee|apprentice)\b", re.I)
 
 
@@ -88,6 +94,8 @@ def seniority_excludes(seniority: str) -> tuple[bool, bool]:
 def title_allowed(title: str, seniority: str) -> bool:
     no_senior, no_intern = seniority_excludes(seniority)
     if no_senior and _SENIOR_TITLE.search(title):
+        return False
+    if seniority == "mid" and _LEAD_TITLE.search(title):
         return False
     return not (no_intern and _INTERN_TITLE.search(title))
 

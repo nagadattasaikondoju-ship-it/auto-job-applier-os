@@ -36,6 +36,10 @@ def test_seniority_title_filter() -> None:
     assert title_allowed("Software Engineer Intern", "fresher")
     assert not title_allowed("Software Engineer Intern", "mid")
     assert title_allowed("Staff Engineer", "senior")
+    assert title_allowed("Senior Software Engineer", "mid")
+    assert not title_allowed("SDE III", "mid") and not title_allowed("SDE-  IV  / Lead Engineer", "mid")
+    assert not title_allowed("Staff Engineer", "mid")
+    assert title_allowed("SDE II", "mid")
 
 
 def test_experience_estimate_from_dates() -> None:

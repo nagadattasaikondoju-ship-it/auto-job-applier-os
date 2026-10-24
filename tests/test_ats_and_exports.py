@@ -221,3 +221,23 @@ def test_tidy_removes_grade_repeated_in_institution() -> None:
 
     parsed = {"educations": [{"institution": "RV College of Engineering, Bengaluru 8.2 CGPA", "grade": "8.2 CGPA"}]}
     assert _tidy(parsed)["educations"][0]["institution"] == "RV College of Engineering, Bengaluru"
+
+
+def test_experience_months_come_from_resume_dates() -> None:
+    from apps.api.routers.resumes import _tidy
+
+    parsed = {
+        "total_experience_months": 360,  # what the model claimed
+        "experiences": [
+            {"title": "Frontend Engineer", "start_date": "Jan 2022", "end_date": "Dec 2024", "is_current": False},
+            {"title": "Software Engineer Intern", "start_date": "Jun 2021", "end_date": "Dec 2021", "is_current": False},
+        ],
+    }
+    assert 34 <= _tidy(parsed)["total_experience_months"] <= 36  # internship not counted
+
+
+def test_recognised_skills_exclude_degrees_and_initials() -> None:
+    r = analyze_resume(STRONG + "\nB.Tech, RV College of Engineering, 8.2 CGPA. Built AI and ML features.", jd_text="AI, ML")
+    keywords = set(r["keywords"]["matched"]) | set(r["keywords"]["missing"])
+    assert not keywords & {"B.Tech", "RV", "CGPA"}
+    assert {"AI", "ML"} <= set(r["keywords"]["matched"])

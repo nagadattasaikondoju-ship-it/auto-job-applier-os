@@ -1,4 +1,6 @@
+import re
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -25,6 +27,7 @@ from packages.core.services.ats import (
     extract_text,
     heuristic_parse,
 )
+from packages.core.services.match_rules import estimate_experience_years
 from packages.core.services.profile import create_profile_version
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
@@ -65,12 +68,12 @@ def _sanity_check(parsed: dict[str, Any], raw_text: str) -> dict[str, Any]:
     so the user never loses data that is visibly in their resume.
     """
     rules = heuristic_parse(raw_text)
-    months = parsed.get("total_experience_months") or 0
-    if not isinstance(months, int) or months < 0 or months > 600:
-        parsed["total_experience_months"] = 0
     for key in ("experiences", "educations", "skills"):
         if not parsed.get(key) and rules.get(key):
             parsed[key] = rules[key]
+    months = parsed.get("total_experience_months") or 0
+    if not isinstance(months, int) or months < 0 or months > 600:
+        parsed["total_experience_months"] = 0
     for key in ("full_name", "email", "phone", "city", "headline", "summary", "current_title", "current_company"):
         if not parsed.get(key) and rules.get(key):
             parsed[key] = rules[key]
@@ -78,8 +81,22 @@ def _sanity_check(parsed: dict[str, Any], raw_text: str) -> dict[str, Any]:
     return _tidy(parsed)
 
 
+def _months_from_dates(experiences: list[dict[str, Any]]) -> int:
+    """Months of non-internship work, from start/end dates."""
+    work = [
+        SimpleNamespace(**{k: e.get(k) for k in ("start_date", "end_date", "is_current")})
+        for e in experiences
+        if not re.search(r"\b(intern|internship|trainee)\b", e.get("title") or "", re.I)
+    ]
+    return round(estimate_experience_years(work) * 12)
+
+
 def _tidy(parsed: dict[str, Any]) -> dict[str, Any]:
     """Small cleanups both parsers need, e.g. a grade repeated inside the institution name."""
+    # The model's experience total is often wrong; the dates on the resume are the source of truth
+    from_dates = _months_from_dates(parsed.get("experiences") or [])
+    if from_dates:
+        parsed["total_experience_months"] = from_dates
     for ed in parsed.get("educations") or []:
         grade, inst = (ed.get("grade") or "").strip(), ed.get("institution") or ""
         if grade and grade in inst:

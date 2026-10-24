@@ -78,13 +78,13 @@ function AnswerRow({ applicationId, field }: { applicationId: string; field: Res
           </p>
           {!editing && (
             <p className={cn("mt-1 whitespace-pre-line", unresolved ? "text-app-muted italic" : "text-app-ink-2")}>
-              {unresolved ? "No answer yet" : current}
+              {unresolved ? (field.required ? "No answer yet" : "Left blank (optional)") : current}
             </p>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Badge tone={unresolved ? "danger" : field.source === "ai" ? "warning" : "success"}>
-            {SOURCE_LABEL[field.source] ?? field.source}
+          <Badge tone={unresolved ? (field.required ? "danger" : "neutral") : field.source === "ai" ? "warning" : "success"}>
+            {unresolved && !field.required ? "Optional" : SOURCE_LABEL[field.source] ?? field.source}
             {field.source === "ai" && field.confidence > 0 && (
               <span className="font-mono">{Math.round(field.confidence * 100)}%</span>
             )}

@@ -11,7 +11,7 @@ import { EMPTY_PREFERENCES, PREFERENCE_STEPS, type PrefValue } from "@/component
 import { Badge, Button, Card, Checkbox, ErrorState, ProgressBar, Spinner, Textarea } from "@/components/app/ui";
 import { ApiError } from "@/lib/api/client";
 import { api } from "@/lib/api/endpoints";
-import type { AtsReport, ConsentPurpose, ParsedResume, UploadResumeResult } from "@/lib/api/types";
+import type { AtsReport, ConsentPurpose, FullProfile, ParsedResume, Seniority, UploadResumeResult } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 type Step = "upload" | "review" | "ats" | "preferences" | "launch";
@@ -375,6 +375,7 @@ function AtsStep({ initial, onBack, onNext }: { initial: AtsReport | null; onBac
 function PreferencesStep({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
   const queryClient = useQueryClient();
   const existing = useQuery({ queryKey: ["preferences"], queryFn: api.preferences.get });
+  const profile = useQuery({ queryKey: ["profile"], queryFn: api.profile.get });
   const [value, setValue] = useState<PrefValue | null>(null);
   const [i, setI] = useState(0);
 
@@ -387,10 +388,14 @@ function PreferencesStep({ onBack, onDone }: { onBack: () => void; onDone: () =>
     onError: (e) => toast.error(e.message),
   });
 
-  if (existing.isPending) return <Spinner />;
+  if (existing.isPending || profile.isPending) return <Spinner />;
   if (existing.isError) return <ErrorState error={existing.error} onRetry={() => existing.refetch()} />;
 
-  const v: PrefValue = value ?? { ...EMPTY_PREFERENCES, ...stripExists(existing.data) };
+  // First time through, start from what the resume already tells us
+  const initial = existing.data.exists
+    ? stripExists(existing.data)
+    : { ...stripExists(existing.data), ...(profile.data ? defaultsFromProfile(profile.data) : {}) };
+  const v: PrefValue = value ?? { ...EMPTY_PREFERENCES, ...initial };
   const set = <K extends keyof PrefValue>(k: K, val: PrefValue[K]) => setValue({ ...v, [k]: val });
   const q = PREFERENCE_STEPS[i];
   const last = i === PREFERENCE_STEPS.length - 1;
@@ -433,6 +438,39 @@ function PreferencesStep({ onBack, onDone }: { onBack: () => void; onDone: () =>
       </form>
     </section>
   );
+}
+
+function defaultsFromProfile(p: FullProfile): Partial<PrefValue> {
+  const months = experienceMonths(p.experiences) || p.profile.total_experience_months || 0;
+  const years = months / 12;
+  const seniority: Seniority = years < 1 ? "fresher" : years < 3 ? "junior" : years < 6 ? "mid" : years < 10 ? "senior" : "lead";
+  const out: Partial<PrefValue> = { seniority };
+  if (p.profile.current_title) out.target_roles = [p.profile.current_title];
+  if (p.profile.city) out.locations = [p.profile.city];
+  return out;
+}
+
+/** Months of non-internship experience, from start/end dates like "Jan 2022" or "2021-06". */
+function experienceMonths(experiences: FullProfile["experiences"]): number {
+  const toMonth = (d: string | null | undefined): number | null => {
+    if (!d) return null;
+    const year = d.match(/(19|20)\d{2}/);
+    if (!year) return null;
+    const names = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const named = names.indexOf(d.slice(0, 3).toLowerCase());
+    const numeric = d.match(/-(\d{1,2})/);
+    const month = named >= 0 ? named : numeric ? Number(numeric[1]) - 1 : 5;
+    return Number(year[0]) * 12 + month;
+  };
+  const now = new Date();
+  let total = 0;
+  for (const e of experiences) {
+    if (/intern|trainee/i.test(e.title ?? "")) continue;
+    const start = toMonth(e.start_date);
+    const end = e.is_current ? now.getFullYear() * 12 + now.getMonth() : toMonth(e.end_date);
+    if (start !== null && end !== null && end > start) total += end - start;
+  }
+  return total;
 }
 
 function stripExists(p: PrefValue & { exists?: boolean }): PrefValue {
@@ -478,20 +516,14 @@ function LaunchStep({ onBack }: { onBack: () => void }) {
   const launch = useMutation({
     mutationFn: async () => {
       for (const c of CONSENTS) await api.consents.set(c.purpose, checked[c.purpose]);
-      await api.jobs.discover().catch(() => undefined);
-      await api.matches.refresh().catch(() => undefined);
       const p = prefs.data!;
       const mode = p.apply_mode === "hybrid" && checked.auto_submit ? "hybrid" : "review";
       return api.autopilot.start({ mode, daily_limit: p.daily_application_limit, min_match_score: p.min_match_score });
     },
-    onSuccess: async (r) => {
+    onSuccess: async () => {
       await queryClient.invalidateQueries();
-      toast.success(
-        r.first_batch.prepared
-          ? `Auto-apply is on. ${r.first_batch.prepared} application(s) are ready for your review.`
-          : "Auto-apply is on. We're searching for jobs and will prepare applications as matches come in."
-      );
-      router.replace(r.first_batch.prepared ? "/review" : "/dashboard");
+      toast.success("Auto-apply is on. We're finding your best matches and preparing applications now.");
+      router.replace("/auto-apply");
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === "AUTOPILOT_NOT_READY") {

@@ -1,20 +1,26 @@
 """Auto-apply (Autopilot) controls: readiness, start/pause/resume, run now, activity and retries."""
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
+from packages.core.database import async_session_maker
 from packages.core.models.applications import Application, ApplicationEvent, Campaign
 from packages.core.models.jobs import Company, Job
 from packages.core.models.preferences import JobPreference
 from packages.core.services.autopilot import DEFAULT_HYBRID_THRESHOLD, AutopilotService, today_start
+from packages.core.services.discovery import discover_for_user
+from packages.core.services.matching import run_matching_funnel_for_user
+
+logger = logging.getLogger("applyon.autopilot")
 
 router = APIRouter(prefix="/autopilot", tags=["Autopilot"])
 
@@ -36,6 +42,8 @@ def _campaign_dict(c: Campaign) -> dict[str, Any]:
         "hybrid_threshold": (c.schedule or {}).get("hybrid_threshold", DEFAULT_HYBRID_THRESHOLD),
         "started_at": c.started_at.isoformat() if c.started_at else None,
         "paused_reason": (c.stats or {}).get("paused_reason"),
+        "preparing": bool((c.stats or {}).get("preparing")),
+        "last_batch": (c.stats or {}).get("last_batch"),
     }
 
 
@@ -99,6 +107,7 @@ async def get_autopilot(
 @router.post("/start")
 async def start_autopilot(
     body: StartRequest,
+    background: BackgroundTasks,
     user: AuthenticatedUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -138,11 +147,45 @@ async def start_autopilot(
         campaign.stats = {k: v for k, v in (campaign.stats or {}).items() if k != "paused_reason"}
     pref.auto_submit_enabled = body.mode == "hybrid"
     pref.daily_application_limit = daily_limit
+    campaign.stats = {**(campaign.stats or {}), "preparing": True}
     await db.commit()
 
-    # Prepare the first applications straight away so the review queue isn't empty.
-    batch = await AutopilotService.run_batch(db, user.user_id, max_items=min(3, daily_limit))
-    return {"campaign": _campaign_dict(campaign), "first_batch": batch}
+    # Matching and tailoring can take a minute (AI calls), so the first batch runs after we reply;
+    # the auto-apply page shows "preparing" until it finishes.
+    background.add_task(_prepare_first_batch, user.user_id, min(3, daily_limit))
+    return {
+        "campaign": _campaign_dict(campaign),
+        "first_batch": {"prepared": 0, "items": [], "stopped_reason": None, "preparing": True},
+    }
+
+
+async def _prepare_first_batch(user_id: str, max_items: int) -> None:
+    """Match against jobs we already have, prepare the first applications, then look for more jobs."""
+    batch: dict[str, Any] = {"prepared": 0, "stopped_reason": None}
+    async with async_session_maker() as db:
+        try:
+            await run_matching_funnel_for_user(db, user_id)
+            batch = await AutopilotService.run_batch(db, user_id, max_items=max_items)
+        except Exception as e:  # never leave the campaign stuck in "preparing"
+            logger.warning("First batch failed for %s: %s", user_id, e)
+            await db.rollback()
+            batch = {"prepared": 0, "stopped_reason": "We couldn't prepare applications just now. We'll keep trying."}
+        campaign = await AutopilotService.get_active_campaign(db, user_id)
+        if campaign:
+            campaign.stats = {
+                **(campaign.stats or {}),
+                "preparing": False,
+                "last_batch": {
+                    "prepared": batch.get("prepared", 0),
+                    "stopped_reason": batch.get("stopped_reason"),
+                    "at": datetime.now(UTC).isoformat(),
+                },
+            }
+            await db.commit()
+    try:
+        await discover_for_user(user_id)
+    except Exception as e:
+        logger.warning("Discovery after start failed for %s: %s", user_id, e)
 
 
 async def _set_status(db: AsyncSession, user_id: str, new_status: str) -> dict[str, Any]:

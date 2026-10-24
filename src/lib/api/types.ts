@@ -646,6 +646,9 @@ export interface Campaign {
   hybrid_threshold: number;
   started_at: string | null;
   paused_reason: string | null;
+  /** True while the first matches and applications are being prepared in the background. */
+  preparing: boolean;
+  last_batch: { prepared: number; stopped_reason: string | null; at: string } | null;
 }
 
 export interface AutopilotState {
@@ -667,6 +670,7 @@ export interface AutopilotState {
 export interface BatchResult {
   prepared: number;
   stopped_reason: string | null;
+  preparing?: boolean;
 }
 
 // ---------- Follow-ups ----------

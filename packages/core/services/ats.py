@@ -105,8 +105,13 @@ def has_metric(s: str) -> bool:
 # Skills that are also everyday English words only count when capitalised ("Go", not "go live")
 _CASE_SENSITIVE_SKILLS = {"Go", "Express", "Swift", "Excel", "Spark", "Git", "Vite", "Android", "Linux"}
 
-# Roman-numeral levels, role abbreviations and web domains look like tech tokens but aren't skills
-_NOT_A_SKILL = re.compile(r"^(I{1,3}|IV|VI{0,3}|SDE\d?|SWE|SDET|[\w-]+\.(com|io|in|ai|co|org|net|dev)(/.*)?)$", re.I)
+# Levels, role abbreviations, degrees and web domains look like tech tokens but aren't skills
+_NOT_A_SKILL = re.compile(
+    r"^(I{1,3}|IV|VI{0,3}|SDE\d?|SWE|SDET|(?!(AI|ML|UI|UX|QA|BI|R)$)[A-Z]{1,2}"  # levels, role abbreviations, initials ("RV")
+    r"|[BM]\.?(Tech|E|Sc|Com|A|S)|MBA|BCA|MCA|PhD|CGPA|GPA|SGPA"  # degrees and grades
+    r"|[\w-]+\.(com|io|in|ai|co|org|net|dev)(/.*)?)$",  # web domains
+    re.I,
+)
 
 
 def _keywords_from(text: str) -> set[str]:

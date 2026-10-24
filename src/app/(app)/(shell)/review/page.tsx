@@ -53,7 +53,8 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(defaultOpen);
   const fields = app.plan.fields ?? [];
-  const unresolved = fields.filter((f) => f.source === "unresolved" || f.value === null || f.value === "").length;
+  // Only required questions block approval; optional ones can be left blank
+  const unresolved = fields.filter((f) => f.required && (f.source === "unresolved" || f.value === null || f.value === "")).length;
   const needsAction = app.status === "needs_user_action";
 
   const done = (msg: string) => {
@@ -105,7 +106,7 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
               <Badge tone={statusTone(app.status)}>{statusLabel(app.status)}</Badge>
               {unresolved > 0 && (
                 <Badge tone="danger">
-                  {unresolved} question{unresolved === 1 ? "" : "s"} need answers
+                  {unresolved} required question{unresolved === 1 ? "" : "s"} need answers
                 </Badge>
               )}
               <Badge>Prepared {timeAgo(app.created_at)}</Badge>
@@ -141,7 +142,7 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
             </p>
           )}
           {unresolved > 0 && !needsAction && (
-            <p className="bg-app-surface px-5 py-3 text-app-ink">Answer the highlighted questions to approve this application.</p>
+            <p className="bg-app-surface px-5 py-3 text-app-ink">Answer the required questions (marked *) to approve this application.</p>
           )}
           <AnswerPlan applicationId={app.id} fields={fields} />
           <div className="border-t border-app-border px-5 py-3">

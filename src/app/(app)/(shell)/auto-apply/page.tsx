@@ -13,7 +13,12 @@ import { statusLabel, statusTone, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export default function AutoApplyPage() {
-  const state = useQuery({ queryKey: ["autopilot"], queryFn: api.autopilot.get, refetchInterval: 30_000 });
+  const state = useQuery({
+    queryKey: ["autopilot"],
+    queryFn: api.autopilot.get,
+    // Poll quickly while the first batch is being prepared in the background
+    refetchInterval: (q) => (q.state.data?.campaign?.preparing ? 4_000 : 30_000),
+  });
   if (state.isPending) return <Spinner label="Loading auto-apply" />;
   if (state.isError) return <ErrorState error={state.error} onRetry={() => state.refetch()} />;
   return <AutoApply data={state.data} />;
@@ -56,8 +61,8 @@ function AutoApply({ data }: { data: AutopilotState }) {
     onSuccess: (r) => {
       setBlockers([]);
       toast.success(
-        r.first_batch.prepared
-          ? `Auto-apply is on. ${r.first_batch.prepared} application(s) prepared.`
+        r.first_batch.preparing
+          ? "Auto-apply is on. Finding your best matches and preparing applications now."
           : `Auto-apply is on. ${r.first_batch.stopped_reason ?? "Applications will be prepared as matches come in."}`
       );
       refresh();
@@ -112,6 +117,30 @@ function AutoApply({ data }: { data: AutopilotState }) {
           </>
         }
       />
+
+      {c?.preparing && (
+        <Card className="mb-6 flex items-center gap-3 p-4" role="status">
+          <Spinner label="Preparing" />
+          <div>
+            <p className="font-medium">Finding your best matches and preparing applications…</p>
+            <p className="text-sm text-app-muted">This usually takes a minute or two. You can leave this page.</p>
+          </div>
+        </Card>
+      )}
+      {!c?.preparing && c?.last_batch && (
+        <Card className="mb-6 flex flex-col gap-3 p-4 sm:flex-row sm:items-center" role="status">
+          <p className="flex-1 text-sm">
+            {c.last_batch.prepared
+              ? `${c.last_batch.prepared} application(s) prepared ${timeAgo(c.last_batch.at)} and waiting for your review.`
+              : c.last_batch.stopped_reason ?? "No new matches yet. We'll keep looking."}
+          </p>
+          {c.last_batch.prepared > 0 && (
+            <ButtonLink href="/review" size="sm">
+              Open review queue
+            </ButtonLink>
+          )}
+        </Card>
+      )}
 
       <Card className="mb-6 p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
