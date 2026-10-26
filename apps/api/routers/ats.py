@@ -12,21 +12,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
 from packages.ai.client import AIUnavailableError, gemini_client
-from packages.ai.schemas import BulletRewriteOutput
+from packages.ai.schemas import BulletRewriteOutput, TailoredResumeOutput
+from packages.ai.truth_checker import verify_resume_truthfulness
 from packages.core.config import settings
-from packages.core.models.jobs import Job
+from packages.core.models.jobs import Company, Job
 from packages.core.models.matching import ResumeVersion
 from packages.core.models.preferences import JobPreference
 from packages.core.models.profile import Experience, Profile, ProfileVersion, Resume, Skill
 from packages.core.services.ats import (
-    ACTION_VERBS,
     WEAK_PHRASES,
     analyze_resume,
     has_metric,
+    is_action_verb,
     profile_snapshot_to_text,
     verify_rewrite,
 )
 from packages.core.services.profile import create_profile_snapshot_for_user
+from packages.documents.ats_optimizer import optimize_resume_for_job
 
 router = APIRouter(prefix="/ats", tags=["ATS Optimizer"])
 
@@ -178,7 +180,7 @@ async def rewrite_bullets(
                 if not text.strip():
                     continue
                 first = text.split()[0].lower().strip(",.")
-                if first not in ACTION_VERBS or any(w in text.lower() for w in WEAK_PHRASES) or not has_metric(text):
+                if not is_action_verb(first) or any(w in text.lower() for w in WEAK_PHRASES) or not has_metric(text):
                     targets.append(BulletRef(experience_id=str(exp.id), bullet_id=_bullet_id(exp, i, b), text=text))
         targets = targets[:12]
 
@@ -348,4 +350,105 @@ async def apply_optimizations(
         "changes": changes,
         "rejected": rejected,
         "ats": report,
+    }
+
+
+class OptimizeForJobRequest(BaseModel):
+    job_id: uuid.UUID | None = None
+    jd_text: str | None = Field(default=None, max_length=20000)
+    job_title: str = Field(default="", max_length=200)
+    company: str = Field(default="", max_length=200)
+
+
+@router.post("/optimize-for-job")
+async def optimize_for_job(
+    body: OptimizeForJobRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Turn the master resume into an ATS resume for one job, saved as a downloadable version."""
+    jd_text, job_title, company = (body.jd_text or "").strip(), body.job_title.strip(), body.company.strip()
+    if body.job_id:
+        row = (
+            await db.execute(
+                select(Job, Company.name).join(Company, Job.company_id == Company.id).where(Job.id == body.job_id)
+            )
+        ).first()
+        if not row:
+            raise HTTPException(status_code=404, detail={"code": "JOB_NOT_FOUND", "message": "Job not found."})
+        job, company_name = row
+        jd_text = jd_text or f"{job.description_text or ''}\n{' '.join(job.required_skills or [])}"
+        job_title, company = job_title or job.title, company or company_name
+    if len(jd_text) < 80:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "JD_TOO_SHORT", "message": "Paste the full job description (at least a few lines)."},
+        )
+
+    version = (
+        await db.execute(
+            select(ProfileVersion)
+            .where(ProfileVersion.user_id == user.user_id)
+            .order_by(ProfileVersion.version_no.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none() or await create_profile_snapshot_for_user(db, user.user_id)
+    snapshot = version.snapshot_json
+    if not snapshot.get("experiences") and not (snapshot.get("profile") or {}).get("summary"):
+        raise HTTPException(
+            status_code=409, detail={"code": "NO_RESUME", "message": "Upload your resume first."}
+        )
+    pref = (await db.execute(select(JobPreference).where(JobPreference.user_id == user.user_id))).scalar_one_or_none()
+    p = snapshot.get("profile") or {}
+
+    result = await optimize_resume_for_job(
+        snapshot,
+        jd_text,
+        job_title=job_title,
+        company=company,
+        seniority=pref.seniority if pref else "",
+        target_role=", ".join((pref.target_roles or [])[:3]) if pref else (p.get("headline") or ""),
+        location=", ".join(x for x in [p.get("city"), p.get("country")] if x),
+    )
+
+    content = result["content"]
+    truth = verify_resume_truthfulness(tailored_resume=TailoredResumeOutput(**content), profile_snapshot=snapshot)
+    report = {k: result[k] for k in (
+        "before", "after", "keywords", "job_analysis", "missing_information", "development_recommendations",
+        "final_recommendation", "verdict", "ai_used",
+    )}
+    count = len(
+        (
+            await db.execute(
+                select(ResumeVersion.id).where(
+                    ResumeVersion.user_id == user.user_id,
+                    ResumeVersion.job_id == body.job_id if body.job_id else ResumeVersion.job_id.is_(None),
+                )
+            )
+        ).all()
+    )
+    rv = ResumeVersion(
+        user_id=user.user_id,
+        job_id=body.job_id,
+        profile_version_id=version.id,
+        content_json={**content, "source": "ats_job_optimizer", "job_title": job_title, "company": company, "report": report},
+        template_id="classic_ats",
+        pdf_path=None,
+        truth_check_status=truth.status,
+        flagged_claims=truth.flagged_claims,
+        status="approved" if truth.status == "passed" else "draft",
+        version_no=count + 1,
+    )
+    db.add(rv)
+    await db.commit()
+
+    return {
+        **result,
+        "job_title": job_title,
+        "company": company,
+        "truth_check_status": truth.status,
+        "flagged_claims": truth.flagged_claims,
+        "resume_version_id": str(rv.id),
+        "pdf_url": f"/v1/resume-versions/{rv.id}/pdf",
+        "docx_url": f"/v1/resume-versions/{rv.id}/docx",
     }

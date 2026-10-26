@@ -6,23 +6,23 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { AtsOptimizer } from "@/components/app/ats-optimizer";
-import { Badge, Button, ButtonLink, Card, CardHeader, EmptyState, ErrorState, PageHeader, Spinner, Tabs, Textarea } from "@/components/app/ui";
+import { JobAtsOptimizer } from "@/components/app/job-ats-optimizer";
+import { Badge, Button, ButtonLink, Card, CardHeader, EmptyState, ErrorState, PageHeader, Spinner, Tabs } from "@/components/app/ui";
 import { ApiError } from "@/lib/api/client";
 import { api } from "@/lib/api/endpoints";
 import { formatDate } from "@/lib/format";
 
-type Target = "general" | "job";
+type Mode = "check" | "job";
 
 export default function ResumePage() {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [target, setTarget] = useState<Target>("general");
-  const [jd, setJd] = useState("");
+  const [mode, setMode] = useState<Mode>("check");
   const [scanKey, setScanKey] = useState(0);
 
   const scan = useQuery({
     queryKey: ["ats", "scan", scanKey],
-    queryFn: () => api.ats.scan({ use_profile: true, jd_text: target === "job" && jd.trim() ? jd : undefined }),
+    queryFn: () => api.ats.scan({ use_profile: true }),
     retry: false,
   });
   const versions = useQuery({ queryKey: ["resume-versions"], queryFn: api.documents.resumeVersions });
@@ -81,53 +81,40 @@ export default function ResumePage() {
         </Card>
       ) : (
         <>
-          <Card className="mb-6 p-5">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-              <div className="flex-1">
-                <p className="flex items-center gap-2 font-medium">
-                  <Target className="size-4" aria-hidden="true" />
-                  Score against
+          <div className="mb-6">
+            <Tabs
+              label="Resume tools"
+              value={mode}
+              onChange={setMode}
+              items={[
+                { value: "check", label: "ATS check & fixes" },
+                { value: "job", label: "Optimize for a job" },
+              ]}
+            />
+          </div>
+
+          {mode === "job" ? (
+            <JobAtsOptimizer />
+          ) : (
+            <>
+              <Card className="mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
+                <p className="flex flex-1 items-center gap-2 text-sm text-app-ink-2">
+                  <Target className="size-4 shrink-0" aria-hidden="true" />
+                  Your resume scored against ATS best practice. To tailor it to a specific job, use “Optimize for a job”.
                 </p>
-                <div className="mt-3">
-                  <Tabs
-                    label="Score against"
-                    value={target}
-                    onChange={(t) => setTarget(t)}
-                    items={[
-                      { value: "general", label: "General ATS best practice" },
-                      { value: "job", label: "A specific job description" },
-                    ]}
-                  />
-                </div>
-                {target === "job" && (
-                  <Textarea
-                    aria-label="Job description"
-                    className="mt-3 min-h-32"
-                    placeholder="Paste the job description to see which keywords you're missing…"
-                    value={jd}
-                    onChange={(e) => setJd(e.target.value)}
-                  />
-                )}
-                <p className="mt-2 text-xs text-app-muted">
-                  Tip: for jobs in your feed, open the job and use “Tailor resume” to get a version made for that role.
-                </p>
-              </div>
-              <Button onClick={() => setScanKey((k) => k + 1)} disabled={target === "job" && jd.trim().length < 50} loading={scan.isFetching}>
-                Re-scan
-              </Button>
-            </div>
-          </Card>
+                <Button variant="secondary" onClick={() => setScanKey((k) => k + 1)} loading={scan.isFetching}>
+                  Re-scan
+                </Button>
+              </Card>
 
           {scan.isPending ? (
             <Spinner label="Scoring your resume" />
           ) : scan.isError ? (
             <ErrorState error={scan.error} onRetry={() => scan.refetch()} />
           ) : (
-            <AtsOptimizer
-              key={`${scanKey}-${scan.dataUpdatedAt}`}
-              report={scan.data}
-              jdText={target === "job" ? jd : undefined}
-            />
+            <AtsOptimizer key={`${scanKey}-${scan.dataUpdatedAt}`} report={scan.data} />
+          )}
+            </>
           )}
 
           <Card as="section" aria-labelledby="versions-title" className="mt-8">
@@ -146,7 +133,9 @@ export default function ResumePage() {
                   <li key={v.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
                     <div className="min-w-0 flex-1">
                       <p className="font-medium">
-                        {v.kind === "tailored" ? (
+                        {v.kind === "tailored" && !v.job_id ? (
+                          `Optimized for ${v.job_title ?? "a job"}${v.company ? ` at ${v.company}` : ""}`
+                        ) : v.kind === "tailored" ? (
                           <>
                             Tailored for{" "}
                             <Link href={`/jobs/${v.job_id}/tailor`} className="underline-offset-4 hover:underline">

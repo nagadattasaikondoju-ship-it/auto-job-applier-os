@@ -91,6 +91,7 @@ class GeminiClient:
         response_model: type[T],
         prompt_version: str = "v1",
         cache_ttl_seconds: int = 86400 * 7,
+        timeout_seconds: float = 45.0,
     ) -> T:
         """
         Generate structured JSON output adhering strictly to response_model schema.
@@ -127,18 +128,22 @@ class GeminiClient:
             },
         }
         attempts = [model_name, model_name]
-        if settings.gemini_model_lite not in attempts:
-            attempts.append(settings.gemini_model_lite)
+        for fallback in [settings.gemini_model_lite, *settings.gemini_fallback_models]:
+            if fallback not in attempts:
+                attempts.append(fallback)
 
         start_time = time.perf_counter()
         res_json: dict[str, Any] | None = None
         last_error = ""
+        skip: set[str] = set()  # models that won't work again on this request (retired, out of quota)
         for i, attempt_model in enumerate(attempts):
+            if attempt_model in skip:
+                continue
             if i == 1:
                 await asyncio.sleep(2)
             url = f"{self.base_url}/models/{attempt_model}:generateContent?key={self.api_key}"
             try:
-                async with httpx.AsyncClient(timeout=45.0) as client:
+                async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                     resp = await client.post(url, json=payload)
             except httpx.HTTPError as e:
                 last_error = f"request to {attempt_model} failed: {type(e).__name__}"
@@ -151,8 +156,8 @@ class GeminiClient:
             logger.warning("Gemini %s: %s", last_error, resp.text[:300])
             if resp.status_code not in (404, 429, 500, 503):
                 break  # bad request: retrying won't help
-            if resp.status_code == 404 and i == 0:
-                continue  # retired model: skip the same-model retry
+            if resp.status_code == 404 or (resp.status_code == 429 and "quota" in resp.text.lower()):
+                skip.add(attempt_model)  # retired or out of daily quota: go straight to the next model
         if res_json is None:
             raise AIUnavailableError(f"Gemini unavailable ({last_error})")
 

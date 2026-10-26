@@ -48,6 +48,10 @@ def verify_resume_truthfulness(
     }
     for s in profile_snapshot.get("skills", []):
         allowed_skills.add(s.get("name", "").lower())
+    # Tools named in the person's own experience, projects or summary are genuine too
+    from packages.core.services.ats import evidenced_skills
+
+    allowed_skills.update(s.lower() for s in evidenced_skills(profile_snapshot))
 
     # Check that skills_ordered is a subset of profile skills
     for skill in tailored_resume.skills_ordered:

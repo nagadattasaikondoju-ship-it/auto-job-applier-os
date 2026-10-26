@@ -134,3 +134,39 @@ class BulletRewrite(BaseModel):
 
 class BulletRewriteOutput(BaseModel):
     rewrites: list[BulletRewrite]
+
+
+# ---------------------------------------------------------------- job-targeted ATS resume
+
+
+class JobDescriptionAnalysis(BaseModel):
+    role_title: str = ""
+    title_variants: list[str] = Field(default_factory=list)
+    hard_skills: list[str] = Field(default_factory=list)
+    soft_skills: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    must_have: list[str] = Field(default_factory=list)
+    nice_to_have: list[str] = Field(default_factory=list)
+    seniority: str = ""
+    industry_terms: list[str] = Field(default_factory=list)
+
+
+class OptimizedBullet(BaseModel):
+    source_bullet_id: str = Field(..., description="id of the original bullet this rewrites")
+    text: str
+
+
+class OptimizedExperience(BaseModel):
+    experience_id: str
+    bullets: list[OptimizedBullet]
+
+
+class AtsResumeOutput(BaseModel):
+    job_analysis: JobDescriptionAnalysis
+    summary: str
+    core_skills: list[str]
+    experiences: list[OptimizedExperience]
+    changes_made: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    development_recommendations: list[str] = Field(default_factory=list)
+    final_recommendation: str = ""

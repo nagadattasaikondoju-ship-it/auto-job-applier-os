@@ -312,26 +312,63 @@ def test_jd_keywords_skip_business_terms_and_hyphenated_words() -> None:
     assert r["keywords"]["missing"] == ["Looker"]
 
 
-def test_tailored_bullets_that_add_claims_fall_back_to_the_original() -> None:
-    from packages.ai.schemas import TailoredBullet, TailoredExperience, TailoredResumeOutput
-    from packages.documents.tailor import keep_bullets_close_to_source
+def test_job_resume_guards_keep_every_claim_traceable() -> None:
+    from packages.ai.schemas import (
+        AtsResumeOutput,
+        JobDescriptionAnalysis,
+        OptimizedBullet,
+        OptimizedExperience,
+    )
+    from packages.documents.ats_optimizer import build_targeted_content
 
-    snap = {"experiences": [{"id": "e1", "bullets": [
-        {"id": "b1", "text": "Responsible for A/B test analysis for the checkout team"},
-        {"id": "b2", "text": "Wrote SQL models in BigQuery that cut reporting time from 6 hours to 45 minutes"},
-    ]}]}
-    tailored = TailoredResumeOutput(
-        summary="", skills_ordered=[], keywords_used=[], changes_made=[],
-        experiences=[TailoredExperience(experience_id="e1", company="Swiggy", title="Data Analyst", bullets=[
-            TailoredBullet(source_bullet_id="b1", text="Analyzed A/B tests for the checkout team"),
-            TailoredBullet(source_bullet_id="b2", text="Wrote SQL models in BigQuery that cut reporting time from "
-                           "6 hours to 45 minutes, significantly enhancing data pipeline efficiency"),
+    snap = {
+        "profile": {"full_name": "Sneha Iyer", "summary": "Data analyst with SQL and Python."},
+        "skills": [{"name": "SQL"}, {"name": "Python"}, {"name": "A/B testing"}],
+        "experiences": [{"id": "e1", "title": "Data Analyst", "company": "Swiggy", "bullets": [
+            {"id": "b1", "text": "Responsible for A/B test analysis for the checkout team"},
+            {"id": "b2", "text": "Wrote SQL models in BigQuery that cut reporting time from 6 hours to 45 minutes"},
+            {"id": "b3", "text": "Worked on churn analysis in Python"},
+            {"id": "b4", "text": "Responsible for A/B test analysis for the checkout team"},
+        ]}],
+    }
+    ai = AtsResumeOutput(
+        job_analysis=JobDescriptionAnalysis(),
+        summary="Data analyst skilled in SQL and Python for product experimentation.",
+        core_skills=["SQL", "Kubernetes", "A/B testing"],
+        experiences=[OptimizedExperience(experience_id="e1", bullets=[
+            OptimizedBullet(source_bullet_id="b1", text="Analyzed A/B tests for the checkout team"),
+            OptimizedBullet(source_bullet_id="b2", text="Built SQL models in BigQuery that cut reporting time from "
+                            "6 hours to 45 minutes, significantly enhancing stakeholder visibility"),
+            OptimizedBullet(source_bullet_id="b3", text="Analyzed churn in Python for 2M users"),
+            OptimizedBullet(source_bullet_id="b4", text="Executed A/B test analysis for the checkout team to evaluate "
+                            "product performance"),
         ])],
     )
-    assert keep_bullets_close_to_source(tailored, snap) == 1
-    bullets = [b.text for b in tailored.experiences[0].bullets]
-    assert bullets[0] == "Analyzed A/B tests for the checkout team"  # a light rephrase stays
-    assert bullets[1] == snap["experiences"][0]["bullets"][1]["text"]  # the added claim is removed
+    content, guard = build_targeted_content(snap, ai, "Product analyst with SQL, A/B testing and Kubernetes")
+    bullets = [b["text"] for b in content["experiences"][0]["bullets"]]
+    assert bullets[0] == "Analyzed A/B tests for the checkout team"  # rephrase kept
+    # the invented ", significantly enhancing stakeholder visibility" is cut; the rephrase stays
+    assert bullets[1] == "Built SQL models in BigQuery that cut reporting time from 6 hours to 45 minutes"
+    assert bullets[2] == "Worked on churn analysis in Python"  # added number -> original
+    assert bullets[3] == "Executed A/B test analysis for the checkout team"  # invented purpose trimmed off
+    assert "Kubernetes" not in content["skills_ordered"] and guard["removed_skills"] == ["Kubernetes"]
+    assert content["skills_ordered"][:2] == ["SQL", "A/B testing"]
+    assert content["experiences"][0]["title"] == "Data Analyst"  # titles always from the profile
+
+    rules_only, _ = build_targeted_content(snap, None, "Python churn modelling")
+    assert rules_only["experiences"][0]["bullets"][0]["source_bullet_id"] == "b3"  # most relevant first
+
+
+def test_job_fit_score_uses_the_requested_weights() -> None:
+    from packages.core.services.ats import job_fit_score
+
+    r = job_fit_score(REALISTIC, "Product Analyst with SQL, Python, A/B testing, Looker and dbt", "Product Analyst")
+    assert [(c["key"], c["max"]) for c in r["categories"]] == [
+        ("keywords", 30), ("experience", 25), ("achievements", 20), ("structure", 15), ("clarity", 10)
+    ]
+    assert r["score"] == sum(c["score"] for c in r["categories"])
+    assert r["keywords"]["matched"] == ["A/B testing", "Python", "SQL"]
+    assert set(r["keywords"]["missing"]) == {"dbt", "Looker"}
 
 
 def test_brand_names_in_job_posts_are_not_missing_skills() -> None:
@@ -344,3 +381,28 @@ def test_recognised_skills_without_a_job_are_real_skills() -> None:
     found = set(r["keywords"]["matched"])
     assert {"SQL", "Python", "Power BI", "A/B testing"} <= found
     assert not found & {"IPL", "JNTU", "MIS"}
+
+
+def test_keyword_report_partial_matches_are_real_near_misses() -> None:
+    from packages.core.services.ats import keyword_report
+
+    r = keyword_report(REALISTIC + "\nPresented results in stakeholder reviews.", "Needs Experimentation, Stakeholder Management, SQL and dbt")
+    assert r["matched"] == ["SQL"]
+    assert r["partial"] == ["Stakeholder Management"]
+    assert set(r["missing"]) == {"dbt", "Experimentation"}
+
+
+def test_present_tense_verbs_count_as_action_verbs() -> None:
+    from packages.core.services.ats import is_action_verb
+
+    assert all(is_action_verb(w) for w in ["Built", "Build", "Builds", "Write", "Analyze", "Leads", "Simplify"])
+    assert not any(is_action_verb(w) for w in ["Responsible", "Helped", "Various"])
+
+
+def test_summary_may_rephrase_ownership_the_resume_states_but_not_invent_leadership() -> None:
+    from packages.documents.ats_optimizer import _new_leadership_claim
+
+    master = "Comfortable owning metrics end to end."
+    assert not _new_leadership_claim("Proven end-to-end metrics ownership.", master)
+    assert _new_leadership_claim("Led a team of analysts.", master)
+    assert _new_leadership_claim("Managed stakeholder roadmaps.", master)

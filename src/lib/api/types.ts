@@ -698,3 +698,56 @@ export interface FollowUpDraft {
   body: string;
   ai: boolean;
 }
+
+// ---------- Job-targeted ATS resume ----------
+export interface JobFitScore {
+  score: number;
+  reason: string;
+  categories: { key: "keywords" | "experience" | "achievements" | "structure" | "clarity"; label: string; score: number; max: number }[];
+}
+
+export interface PrintableResume {
+  name: string;
+  headline: string;
+  contact: string[];
+  summary: string;
+  skills: string[];
+  experiences: { title: string; company: string; dates: string; location: string; bullets: string[] }[];
+  educations: { line: string; institution: string; dates: string; grade: string }[];
+  projects: { title: string; description: string; skills: string[] }[];
+  certifications: string[];
+}
+
+export interface JobAtsResult {
+  ai_used: boolean;
+  job_title: string;
+  company: string;
+  verdict: "ready" | "minor_edits" | "needs_info";
+  final_recommendation: string;
+  before: JobFitScore;
+  after: JobFitScore;
+  keywords: { matched: string[]; partial: string[]; missing: string[]; coverage: number };
+  job_analysis: {
+    role_title: string;
+    title_variants: string[];
+    hard_skills: string[];
+    soft_skills: string[];
+    tools: string[];
+    must_have: string[];
+    nice_to_have: string[];
+    seniority: string;
+    industry_terms: string[];
+  };
+  resume: PrintableResume;
+  changes_made: string[];
+  missing_information: string[];
+  development_recommendations: string[];
+  guard: {
+    reverted_bullets: { original: string; rejected: string }[];
+    removed_skills: string[];
+    summary_kept_original: boolean;
+    rejected_summary: string | null;
+  };
+  truth_check_status: string;
+  resume_version_id: string;
+}

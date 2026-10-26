@@ -24,6 +24,25 @@ ACTION_VERBS = {
     "shipped", "simplified", "spearheaded", "standardized", "streamlined", "supported",
     "tested", "trained", "transformed", "tripled", "doubled", "upgraded", "wrote",
 }
+_IRREGULAR_PAST = {"build": "built", "write": "wrote", "lead": "led", "grow": "grew", "drive": "drove", "cut": "cut"}
+
+
+def is_action_verb(word: str) -> bool:
+    """Strong action verb in past or present tense ("Built"/"Build"/"Builds", "Analyzed"/"Analyze")."""
+    w = word.lower().strip(",.;:")
+    if w in ACTION_VERBS:
+        return True
+    for stem in {w, w[:-1] if w.endswith("s") else w}:
+        if (
+            _IRREGULAR_PAST.get(stem) in ACTION_VERBS
+            or stem + "d" in ACTION_VERBS
+            or stem + "ed" in ACTION_VERBS
+            or (stem.endswith("y") and stem[:-1] + "ied" in ACTION_VERBS)
+        ):
+            return True
+    return False
+
+
 WEAK_PHRASES = [
     "responsible for", "worked on", "helped with", "helped to", "involved in", "duties included",
     "tasked with", "participated in", "assisted with", "various", "etc",
@@ -147,6 +166,19 @@ def _norm(k: str) -> str:
     return re.sub(r"[^a-z0-9+#]", "", k.lower())
 
 
+_KNOWN_SKILLS = {sk.lower() for sk in ALL_SKILLS} | _TECH_ACRONYMS
+
+
+def is_skill(k: str) -> bool:
+    """Known skills plus tech-style tokens (C++, Node.js, Neo4J). Other capitalised words are usually
+    names of brands, colleges or events (InMobi, JNTU, IPL) rather than skills."""
+    return k.lower() in _KNOWN_SKILLS or bool(re.search(r"[+#.\d]", k))
+
+
+def jd_keywords(jd_text: str) -> set[str]:
+    return {k for k in _keywords_from(jd_text) if is_skill(k)}
+
+
 def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str] | None = None) -> dict[str, Any]:
     """Score a resume out of 100 across six categories and list concrete, fixable issues."""
     lower = text.lower()
@@ -200,7 +232,7 @@ def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str
     # 3. Bullet quality (25)
     weak_bullets: list[dict[str, str]] = []
     if bullets:
-        verb_start = [b for b in bullets if b.split()[0].lower().strip(",.") in ACTION_VERBS]
+        verb_start = [b for b in bullets if is_action_verb(b.split()[0])]
         with_metric = [b for b in bullets if has_metric(b)]
         too_long = [b for b in bullets if len(b.split()) > 35]
         weak = [b for b in bullets if any(w in b.lower() for w in WEAK_PHRASES)]
@@ -217,7 +249,7 @@ def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str
             add_issue("low", "Very long bullets", f"{len(too_long)} bullet(s) are over 35 words.", "Keep bullets to 1–2 lines (15–30 words).", "bullets")
         for b in bullets:
             reasons = []
-            if b.split()[0].lower().strip(",.") not in ACTION_VERBS:
+            if not is_action_verb(b.split()[0]):
                 reasons.append("doesn't start with an action verb")
             if not has_metric(b):
                 reasons.append("has no measurable result")
@@ -233,15 +265,8 @@ def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str
     # 4. Keywords (25)
     resume_kw = _keywords_from(text)
     resume_norm = {_norm(k) for k in resume_kw}
-    # Known skills plus tech-style tokens (C++, Node.js, Neo4J); other capitalised words are usually
-    # names of brands, colleges or events (InMobi, JNTU, IPL) rather than skills
-    known = {sk.lower() for sk in ALL_SKILLS} | _TECH_ACRONYMS
-
-    def is_skill(k: str) -> bool:
-        return k.lower() in known or bool(re.search(r"[+#.\d]", k))
-
     if jd_text and jd_text.strip():
-        jd_kw = {k for k in _keywords_from(jd_text) if is_skill(k)}
+        jd_kw = jd_keywords(jd_text)
         matched = sorted(k for k in jd_kw if _norm(k) in resume_norm or k.lower() in lower)
         missing = sorted(k for k in jd_kw if k not in matched)
         coverage = len(matched) / max(1, len(jd_kw))
@@ -581,3 +606,99 @@ def heuristic_parse(text: str) -> dict[str, Any]:
             for s in _parse_skills(sections.get("skills", []), text)
         ],
     }
+
+
+# ---------------------------------------------------------------- job-targeted scoring
+
+JOB_FIT_WEIGHTS = (
+    ("keywords", "Keyword & skill match", 30),
+    ("experience", "Relevant experience", 25),
+    ("achievements", "Achievements & impact", 20),
+    ("structure", "ATS structure & parsing", 15),
+    ("clarity", "Clarity & readability", 10),
+)
+
+
+def keyword_report(resume_text: str, jd_text: str) -> dict[str, Any]:
+    """Job keywords the resume covers, covers loosely (\"Postgres\" vs \"PostgreSQL\") or lacks."""
+    lower = resume_text.lower()
+    resume_norm = {_norm(k) for k in _keywords_from(resume_text)}
+    words = set(re.findall(r"[a-z0-9+#]+", lower))
+    matched, partial, missing = [], [], []
+    for k in sorted(jd_keywords(jd_text), key=str.lower):
+        nk = _norm(k)
+        parts = [w for w in re.findall(r"[a-z0-9+#]+", k.lower()) if len(w) > 2]
+        if nk in resume_norm or re.search(rf"(?<![\w]){re.escape(k.lower())}(?![\w])", lower):
+            matched.append(k)
+        elif (len(parts) > 1 and any(p in words for p in parts)) or (
+            len(nk) >= 6 and any(r != nk and (r.startswith(nk[:6]) or nk.startswith(r[:6])) for r in resume_norm if len(r) >= 6)
+        ):
+            partial.append(k)  # "stakeholder" for "Stakeholder Management", "Postgres" for "PostgreSQL"
+        else:
+            missing.append(k)
+    total = len(matched) + len(partial) + len(missing)
+    coverage = round(100 * (len(matched) + 0.5 * len(partial)) / total) if total else 100
+    return {"matched": matched, "partial": partial, "missing": missing, "coverage": coverage}
+
+
+def job_fit_score(resume_text: str, jd_text: str, job_title: str = "") -> dict[str, Any]:
+    """0-100 fit for one job: keywords 30, relevant experience 25, achievements 20, structure 15, clarity 10."""
+    base = analyze_resume(resume_text, jd_text)
+    cat = {c["key"]: c for c in base["categories"]}
+    kw = keyword_report(resume_text, jd_text)
+    jd_kw = {k.lower() for k in jd_keywords(jd_text)}
+
+    # Relevant experience: does the resume's role match the job title, and how many bullets use the job's skills
+    secs = _split_sections(resume_text)
+    bullets = _bullets("\n".join(secs.get("experience", []) + secs.get("projects", []))) or _bullets(resume_text)
+    relevant = [b for b in bullets if any(re.search(rf"(?<![\w]){re.escape(k)}(?![\w])", b.lower()) for k in jd_kw)]
+    bullet_share = len(relevant) / len(bullets) if bullets else 0.0
+    title_words = [w for w in re.findall(r"[a-z]+", job_title.lower()) if w not in _STOPWORDS and len(w) > 2 and w not in {"senior", "junior", "lead", "ii", "iii"}]
+    head = " ".join(_lines(resume_text)[:3] + secs.get("experience", [])[:12]).lower()
+    title_share = sum(1 for w in title_words if w[:5] in head) / len(title_words) if title_words else 0.5
+
+    raw = {
+        "keywords": kw["coverage"] / 100,
+        "experience": 0.4 * title_share + 0.6 * min(1.0, bullet_share / 0.6),
+        "achievements": cat["bullets"]["score"] / cat["bullets"]["max"],
+        "structure": (cat["contact"]["score"] + cat["sections"]["score"]) / (cat["contact"]["max"] + cat["sections"]["max"]),
+        "clarity": (cat["formatting"]["score"] + cat["readability"]["score"]) / (cat["formatting"]["max"] + cat["readability"]["max"]),
+    }
+    categories = [
+        {"key": key, "label": label, "score": round(max(0.0, min(1.0, raw[key])) * weight), "max": weight}
+        for key, label, weight in JOB_FIT_WEIGHTS
+    ]
+    score = sum(c["score"] for c in categories)
+    weak = sum(1 for i in base["issues"] if i["title"] == "Weak phrasing")
+    reasons = [f"Covers {len(kw['matched'])} of {len(kw['matched']) + len(kw['partial']) + len(kw['missing'])} job keywords"]
+    reasons.append(f"{len(relevant)} of {len(bullets)} bullets show the job's skills")
+    if title_words:
+        reasons.append("title matches the role" if title_share >= 0.5 else "title differs from the role")
+    if weak:
+        reasons.append("some bullets use weak phrasing")
+    return {
+        "score": score,
+        "categories": categories,
+        "reason": "; ".join(reasons) + ".",
+        "keywords": kw,
+        "issues": base["issues"],
+    }
+
+
+def evidenced_skills(snapshot: dict[str, Any]) -> list[str]:
+    """Skills the profile proves: the listed skills plus tools named in the summary, experience and projects.
+
+    Certification names are left out ("PL-300" is a credential, not a skill).
+    """
+    names = [s.get("name", "") for s in snapshot.get("skills", []) if s.get("name")]
+    p = snapshot.get("profile") or {}
+    texts = [p.get("summary") or ""]
+    for e in snapshot.get("experiences", []):
+        texts += [b.get("text", "") if isinstance(b, dict) else str(b) for b in e.get("bullets", [])]
+    for pr in snapshot.get("projects", []):
+        texts += [pr.get("description") or "", " ".join(pr.get("skills") or [])]
+    found = [k for k in _keywords_from("\n".join(texts)) if is_skill(k)]
+    out: dict[str, str] = {}
+    for n in [*names, *found]:
+        out.setdefault(_norm(n), n)
+    return list(out.values())

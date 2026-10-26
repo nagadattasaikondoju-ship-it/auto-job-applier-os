@@ -207,9 +207,11 @@ async def list_resume_versions(
     for ver, job_title, company in rows:
         d = _version_dict(ver)
         d.pop("content", None)
-        d["job_title"] = job_title
-        d["company"] = company
-        d["kind"] = "tailored" if ver.job_id else "optimized"
+        content = ver.content_json or {}
+        # Job-optimized versions made from a pasted job description carry the job in their content
+        d["job_title"] = job_title or content.get("job_title")
+        d["company"] = company or content.get("company")
+        d["kind"] = "tailored" if ver.job_id or content.get("source") == "ats_job_optimizer" else "optimized"
         items.append(d)
     return {"items": items}
 
