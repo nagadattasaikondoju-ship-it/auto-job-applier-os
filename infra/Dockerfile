@@ -29,8 +29,10 @@ COPY packages/ packages/
 COPY migrations/ migrations/
 COPY alembic.ini .
 COPY infra/seed/ infra/seed/
+COPY infra/start.sh infra/start.sh
+RUN chmod +x infra/start.sh
 
 EXPOSE 8000
 
-# Default: API server. Hosts like Render set $PORT.
-CMD ["sh", "-c", "uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Default: migrate, start the worker and serve the API (see infra/start.sh). Hosts set $PORT.
+CMD ["/app/infra/start.sh"]
