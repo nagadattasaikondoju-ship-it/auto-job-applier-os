@@ -47,6 +47,7 @@ class JobIn(BaseModel):
     required_skills: list[str] = Field(default_factory=list)
     application_url: str
     ats_type: str = "unknown"
+    ats_board_token: str | None = None  # public board of the company, when the apply link reveals it
     posted_at: datetime | None = None
     content_hash: str = ""
     quality_score: int = 100

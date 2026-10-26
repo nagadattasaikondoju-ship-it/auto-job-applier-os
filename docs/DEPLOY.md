@@ -13,6 +13,7 @@
    Fill in the secret values it asks for:
    - `GEMINI_API_KEY`: required for AI parsing, scoring and tailoring.
    - `ADZUNA_APP_ID` / `ADZUNA_APP_KEY`: optional, but strongly recommended for a much bigger job pool.
+   - `JSEARCH_API_KEY`: optional. JSearch (OpenWebNinja, https://app.openwebninja.com/api/jsearch) adds Google for Jobs listings (LinkedIn, Naukri, company sites). Each role + city query runs at most every 12 hours to save credits, and any Greenhouse, Lever or Ashby board it finds is added to the crawl list automatically.
    - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`: leave empty until Firebase login is set up.
 4. **Apply.** The first build takes about 10 minutes (it installs Chromium for auto-submitting).
    On every start the API runs database migrations, loads the company list and starts the

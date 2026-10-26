@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # Job Ingestion
     adzuna_app_id: str = ""
     adzuna_app_key: str = ""
+    # JSearch (OpenWebNinja): Google for Jobs listings incl. LinkedIn/Naukri/company sites
+    jsearch_api_key: str = ""
+    jsearch_base_url: str = "https://api.openwebninja.com/jsearch"
     crawler_user_agent: str = "ApplyonBot/1.0 (+https://applyon.in/bot)"
 
     # Transactional Email (Resend)

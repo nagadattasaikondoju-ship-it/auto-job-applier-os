@@ -123,13 +123,19 @@ def match_user_jobs(user_id: str) -> dict[str, Any]:
 
 @celery_app.task(name="jobs.discover_all", queue="job_ingestion")
 def discover_all_jobs() -> dict[str, Any]:
-    """Scheduled: crawl due company boards and Adzuna for every user's roles and cities."""
-    from packages.core.services.discovery import crawl_adzuna_for_preferences, crawl_due_companies
+    """Scheduled: JSearch, due company boards and Adzuna for every user's roles and cities."""
+    from packages.core.services.discovery import (
+        crawl_adzuna_for_preferences,
+        crawl_due_companies,
+        crawl_jsearch_for_preferences,
+    )
 
     async def _run() -> dict[str, Any]:
+        # JSearch first: boards it reveals (Greenhouse/Lever/Ashby) get crawled in the same run
+        jsearch = await crawl_jsearch_for_preferences(max_queries=20)
         boards = await crawl_due_companies(limit=50)
         adzuna = await crawl_adzuna_for_preferences(max_pairs=40)
-        return {**boards, **adzuna}
+        return {**jsearch, **boards, **adzuna}
 
     return run_async(_run())
 
