@@ -241,3 +241,17 @@ def test_recognised_skills_exclude_degrees_and_initials() -> None:
     keywords = set(r["keywords"]["matched"]) | set(r["keywords"]["missing"])
     assert not keywords & {"B.Tech", "RV", "CGPA"}
     assert {"AI", "ML"} <= set(r["keywords"]["matched"])
+
+
+def test_settings_accept_hosted_database_urls() -> None:
+    from packages.core.config import Settings
+
+    s = Settings(
+        app_env="production",
+        database_url="postgres://u:p@db.render.com/applyon",
+        direct_database_url="postgres://u:p@db.render.com/applyon",
+    )
+    assert s.database_url == "postgresql+asyncpg://u:p@db.render.com/applyon"
+    assert s.direct_database_url == "postgresql://u:p@db.render.com/applyon"
+    assert not s.dev_login_enabled
+    assert Settings(app_env="production", allow_dev_login=True).dev_login_enabled

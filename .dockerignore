@@ -1,0 +1,10 @@
+node_modules
+.next
+.venv
+.git
+artifacts
+storage
+dump.rdb
+**/__pycache__
+src
+public

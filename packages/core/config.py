@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -71,9 +71,33 @@ class Settings(BaseSettings):
         ]
     )
 
+    # Hosted previews only: accept "dev-token-<uid>" logins without Firebase. Anyone can sign in
+    # as anyone, so never enable this for real users.
+    allow_dev_login: bool = False
+
     # Observability
     sentry_dsn: str = ""
     extension_id: str = ""
+
+    @field_validator("database_url")
+    @classmethod
+    def _async_driver(cls, v: str) -> str:
+        """Hosts hand out postgres:// URLs; the app needs the asyncpg driver."""
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+asyncpg://" + v[len(prefix) :]
+        return v
+
+    @field_validator("direct_database_url")
+    @classmethod
+    def _plain_driver(cls, v: str) -> str:
+        if v.startswith("postgres://"):
+            return "postgresql://" + v[len("postgres://") :]
+        return v.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    @property
+    def dev_login_enabled(self) -> bool:
+        return self.app_env in ("development", "test") or self.allow_dev_login
 
 
 settings = Settings()
