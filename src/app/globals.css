@@ -3,6 +3,34 @@
 
 @import "tailwindcss";
 
+/* App (logged-in product) tokens, from the Duna design system in DESIGN.md.
+   Namespaced `app-*` so they never change the landing page. */
+@theme {
+  --color-app-bg: #F7F7F5;          /* color-16 page background */
+  --color-app-panel: #EEEEEE;       /* color-15 secondary background */
+  --color-app-surface: #EDECE7;     /* color-14 surface */
+  --color-app-card: #FFFFFF;        /* color-17 */
+  --color-app-ink: #1B0624;         /* color-1 text primary */
+  --color-app-ink-2: #444444;       /* color-2 text primary (body) */
+  --color-app-dark: #525252;        /* color-4 */
+  --color-app-muted: #858585;       /* color-5 text secondary */
+  --color-app-subtle: #9A9A9A;      /* color-8 text secondary */
+  --color-app-accent: #01A77D;      /* color-7 accent */
+  --color-app-link: #0000EE;        /* color-3 */
+  --color-app-border: #E5E7EB;      /* color-13 border */
+  --color-app-line: #D4D4D4;        /* color-10 */
+  /* Only non-palette colour: needed for destructive actions and errors (accessibility). */
+  --color-app-danger: #B42318;
+
+  --radius-app-sm: 6px;
+  --radius-app-md: 8px;
+  --radius-app-lg: 12px;
+  --radius-app-xl: 14px;
+
+  --shadow-app-ring: rgba(0, 0, 0, 0.05) 0px 0px 0px 1px inset;
+  --shadow-app-side: rgba(0, 0, 0, 0.06) -4px 0px 12px 0px;
+}
+
 :root {
   --background: 0 0% 100%;
   --foreground: 210 14% 17%;

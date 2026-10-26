@@ -2,10 +2,8 @@
 
 import json
 import logging
-import uuid
-from typing import Literal
 
-from sqlalchemy import and_, not_, or_, select
+from sqlalchemy import ColumnElement, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.ai.client import gemini_client
@@ -14,15 +12,31 @@ from packages.core.config import settings
 from packages.core.models.jobs import Company, Job, JobEmbedding
 from packages.core.models.matching import JobMatch
 from packages.core.models.preferences import JobPreference
-from packages.core.models.profile import Profile, ProfileEmbedding, ProfileVersion
+from packages.core.models.profile import (
+    Experience,
+    Profile,
+    ProfileEmbedding,
+    ProfileVersion,
+    Skill,
+)
 from packages.core.redis import get_async_redis
+from packages.core.services.match_rules import (
+    estimate_experience_years,
+    location_patterns,
+    role_title_patterns,
+    rule_based_score,
+    title_allowed,
+)
 
 logger = logging.getLogger("applyon.matching")
+
+# Gemini scores only the best few candidates per run; the rest use rule-based scores.
+AI_SCORED_PER_RUN = 8
 
 
 async def run_matching_funnel_for_user(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    user_id: str,
     top_k: int = 30,
 ) -> list[JobMatch]:
     """Execute the multi-stage matching funnel for a user."""
@@ -58,38 +72,52 @@ async def run_matching_funnel_for_user(
     emb_res = await session.execute(emb_stmt)
     user_embedding = emb_res.scalar_one_or_none()
 
-    # User experience in years
-    user_exp_years = (profile.total_experience_months or 0) / 12.0
+    experiences = list((await session.execute(select(Experience).where(Experience.user_id == user_id))).scalars().all())
+    skills = [
+        sk.name for sk in (await session.execute(select(Skill).where(Skill.user_id == user_id))).scalars().all() if sk.name
+    ]
 
-    # 2. Stage 1: SQL Hard Filters
-    # Existing match job IDs to exclude
-    existing_stmt = select(JobMatch.job_id).where(JobMatch.user_id == user_id)
-    existing_matches = (await session.execute(existing_stmt)).scalars().all()
-    excluded_job_ids = set(existing_matches)
+    # Effective experience: parsed total, else estimated from dates, never below the chosen band
+    user_exp_years = (profile.total_experience_months or 0) / 12.0 or estimate_experience_years(experiences)
+    user_exp_years = max(user_exp_years, float(preferences.min_exp or 0))
 
-    filter_conditions = [
+    # 2. Stage 1: SQL hard filters (roles, locations, experience, exclusions)
+    existing_matches = (await session.execute(select(JobMatch.job_id).where(JobMatch.user_id == user_id))).scalars().all()
+    filter_conditions: list[ColumnElement[bool]] = [
         Job.is_active.is_(True),
         Job.is_suspicious.is_(False),
-        # Experience tolerance: within ±1.5 years
         Job.experience_min <= int(user_exp_years + 1.5),
         Job.experience_max >= max(0, int(user_exp_years - 1.5)),
     ]
+    if existing_matches:
+        filter_conditions.append(not_(Job.id.in_(set(existing_matches))))
 
-    if excluded_job_ids:
-        filter_conditions.append(not_(Job.id.in_(excluded_job_ids)))
+    title_patterns = role_title_patterns(preferences.target_roles or [], preferences.role_keywords or [])
+    if title_patterns:
+        filter_conditions.append(or_(*[Job.title.ilike(p) for p in title_patterns]))
+
+    allows_remote = "remote" in (preferences.remote_mode or []) or any(
+        c.lower() == "remote" for c in (preferences.locations or [])
+    )
+    city_patterns = location_patterns(preferences.locations or [])
+    if city_patterns:
+        loc_clauses: list[ColumnElement[bool]] = [Job.location_raw.ilike(p) for p in city_patterns]
+        if allows_remote:
+            loc_clauses.append(Job.remote_mode == "remote")
+        filter_conditions.append(or_(*loc_clauses))
+    elif not allows_remote and preferences.remote_mode:
+        filter_conditions.append(Job.remote_mode.in_(preferences.remote_mode))
 
     if preferences.excluded_companies:
-        filter_conditions.append(not_(Company.name.in_(preferences.excluded_companies)))
+        filter_conditions.append(
+            not_(func.lower(Company.name).in_([c.lower() for c in preferences.excluded_companies]))
+        )
+    for kw in preferences.excluded_keywords or []:
+        filter_conditions.append(not_(Job.title.ilike(f"%{kw}%")))
 
     if preferences.min_salary_lpa:
-        # If job specifies a maximum salary, it should meet user's minimum
         filter_conditions.append(
-            and_(
-                or_(
-                    Job.salary_max_lpa.is_(None),
-                    Job.salary_max_lpa >= preferences.min_salary_lpa,
-                )
-            )
+            or_(Job.salary_max_lpa.is_(None), Job.salary_max_lpa >= preferences.min_salary_lpa)
         )
 
     base_query = (
@@ -97,111 +125,105 @@ async def run_matching_funnel_for_user(
         .join(Company, Job.company_id == Company.id)
         .outerjoin(JobEmbedding, Job.id == JobEmbedding.job_id)
         .where(*filter_conditions)
+        .order_by(Job.posted_at.desc().nulls_last())
     )
-
-    candidates_res = await session.execute(base_query.limit(200))
-    candidates = candidates_res.all()
+    candidates = [
+        (job, vec)
+        for job, vec in (await session.execute(base_query.limit(400))).all()
+        if title_allowed(job.title, preferences.seniority)
+    ]
 
     if not candidates:
         logger.info("No candidates passed Stage 1 hard filters for user %s", user_id)
         return []
 
-    # 3. Stage 2: Vector distance ranking
+    # 3. Stage 2: rank by skill overlap and title fit, blended with vector similarity when available
     scored_candidates = []
     for job, job_vec in candidates:
-        vector_score = 0.5  # default if embedding not present
-        if user_embedding and job_vec is not None:
-            # Cosine similarity approximation
+        rules = rule_based_score(skills, preferences.target_roles or [], job, preferences.min_match_score)
+        rank = rules["match_score"] / 100.0
+        vector_score = None
+        if user_embedding is not None and job_vec is not None:
             try:
-                # dot product of normalized vectors
-                u_vec = user_embedding.embedding
-                dot = sum(a * b for a, b in zip(u_vec, job_vec, strict=False))
+                dot = sum(a * b for a, b in zip(user_embedding.embedding, job_vec, strict=False))
                 vector_score = max(0.0, min(1.0, (dot + 1.0) / 2.0))
+                rank = 0.7 * rank + 0.3 * vector_score
             except Exception:
-                vector_score = 0.5
-        scored_candidates.append((job, vector_score))
+                vector_score = None
+        scored_candidates.append((job, rank, vector_score, rules))
 
-    # Sort descending by vector_score and take top_k
     scored_candidates.sort(key=lambda x: x[1], reverse=True)
     top_candidates = scored_candidates[:top_k]
 
-    # 4. Stage 3: Batched Gemini Scoring
+    # 4. Stage 3: AI scoring for the very top (saves quota); rules score the rest
     redis = await get_async_redis()
     results: list[JobMatch] = []
+    ai_budget = 0 if gemini_client.is_mock else min(AI_SCORED_PER_RUN, len(top_candidates))
+    profile_brief = _profile_brief(profile, experiences, skills, user_exp_years)
 
-    # Process in batches of 5
-    batch_size = 5
-    for i in range(0, len(top_candidates), batch_size):
-        batch = top_candidates[i : i + batch_size]
-        for job, v_score in batch:
+    for idx, (job, _rank, v_score, rules) in enumerate(top_candidates):
+        match_out: MatchScoreOutput | None = None
+        if idx < ai_budget:
             cache_key = f"match:{user_id}:{job.id}:{profile_version_id or 'none'}"
             cached_data = await redis.get(cache_key)
-
             if cached_data:
-                score_data = json.loads(cached_data)
-                match_out = MatchScoreOutput.model_validate(score_data)
+                match_out = MatchScoreOutput.model_validate(json.loads(cached_data))
             else:
-                prompt = f"""Evaluate candidate-job fit.
-Candidate Profile:
-- Title: {profile.current_title or "Fresher"}
-- Experience: {user_exp_years:.1f} years
-- Summary: {profile.summary or "Motivated professional"}
-
-Job Posting:
-- Title: {job.title}
-- Required Experience: {job.experience_min}-{job.experience_max} years
-- Description: {job.description_text[:1200]}
-
-Rate match 0-100, provide decision ('apply', 'maybe', 'skip'), fit reasons, gaps, and resume focus.
-"""
                 try:
                     match_out = await gemini_client.generate_structured(
                         model_name=settings.gemini_model_fast,
-                        system_instruction="You are an expert recruitment and candidate matching system.",
-                        prompt=prompt,
+                        system_instruction=(
+                            "You are an expert recruiter for Indian tech hiring. Score how well the candidate "
+                            "fits the job from 0-100, honestly. Only cite facts present in the candidate profile."
+                        ),
+                        prompt=(
+                            f"Candidate:\n{profile_brief}\n\nJob (job_id {job.id}):\nTitle: {job.title}\n"
+                            f"Location: {job.location_raw}\nExperience: {job.experience_min}-{job.experience_max} years\n"
+                            f"Required skills: {', '.join(job.required_skills or [])}\n"
+                            f"Description: {(job.description_text or '')[:1500]}\n\n"
+                            "Return match_score, decision (apply >= 70, maybe 50-69, skip < 50), fit_reasons, "
+                            "gaps, resume_focus (which of the candidate's real experience to emphasise) and risk_flags."
+                        ),
                         response_model=MatchScoreOutput,
-                        cache_ttl_seconds=86400 * 30,  # 30 days
+                        cache_ttl_seconds=86400 * 30,
                     )
-                    # Cache in redis
-                    await redis.set(
-                        cache_key,
-                        match_out.model_dump_json(),
-                        ex=86400 * 30,
-                    )
+                    await redis.set(cache_key, match_out.model_dump_json(), ex=86400 * 30)
                 except Exception as e:
                     logger.warning("Gemini scoring failed for job %s: %s", job.id, e)
-                    # Graceful deterministic fallback
-                    score = int(v_score * 100)
-                    decision: Literal["apply", "maybe", "skip"] = (
-                        "apply" if score >= preferences.min_match_score else "maybe"
-                    )
-                    match_out = MatchScoreOutput(
-                        job_id=str(job.id),
-                        match_score=score,
-                        decision=decision,
-                        fit_reasons=["Relevant experience", "Core skill alignment"],
-                        gaps=[],
-                        resume_focus=["Recent impact metrics"],
-                        risk_flags=[],
-                    )
+                    ai_budget = idx  # stop calling AI this run (quota/outage); rules take over
+                    match_out = None
+        if match_out is None:
+            match_out = MatchScoreOutput(job_id=str(job.id), **rules)
 
-            # Persist JobMatch
-            job_match = JobMatch(
-                user_id=user_id,
-                job_id=job.id,
-                profile_version_id=profile_version_id,
-                filter_passed=True,
-                vector_score=v_score,
-                match_score=match_out.match_score,
-                decision=match_out.decision,
-                fit_reasons=match_out.fit_reasons,
-                gaps=match_out.gaps,
-                resume_focus=match_out.resume_focus,
-                risk_flags=match_out.risk_flags,
-                status="new",
-            )
-            session.add(job_match)
-            results.append(job_match)
+        job_match = JobMatch(
+            user_id=user_id,
+            job_id=job.id,
+            profile_version_id=profile_version_id,
+            filter_passed=True,
+            vector_score=v_score,
+            match_score=match_out.match_score,
+            decision=match_out.decision,
+            fit_reasons=match_out.fit_reasons,
+            gaps=match_out.gaps,
+            resume_focus=match_out.resume_focus,
+            risk_flags=match_out.risk_flags,
+            status="new",
+        )
+        session.add(job_match)
+        results.append(job_match)
 
     await session.commit()
     return results
+
+
+def _profile_brief(profile: Profile, experiences: list[Experience], skills: list[str], years: float) -> str:
+    lines = [
+        f"Headline: {profile.headline or profile.current_title or 'Not stated'}",
+        f"Experience: about {years:.1f} years",
+        f"Skills: {', '.join(skills[:30]) or 'Not listed'}",
+        f"Summary: {(profile.summary or '')[:400]}",
+    ]
+    for e in experiences[:4]:
+        bullets = [b.get("text", "") if isinstance(b, dict) else str(b) for b in (e.bullets or [])][:3]
+        lines.append(f"- {e.title} at {e.company}: " + " | ".join(bullets))
+    return "\n".join(lines)

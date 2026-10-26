@@ -10,8 +10,6 @@ from apps.browser.executor import BrowserAutomationExecutor
 from packages.core.models.applications import Campaign
 from packages.core.models.jobs import Job
 from packages.core.models.matching import JobMatch
-from packages.core.models.platform import Consent
-from packages.core.models.profile import Experience, Profile
 from packages.core.services.autopilot import AutopilotService
 
 
@@ -80,250 +78,174 @@ async def test_browser_executor_success_and_dry_run():
 
 
 @pytest.mark.asyncio
-async def test_can_run_autopilot_guards():
-    """Test safety guards: profile completeness, DPDP consent, campaign status, and circuit breaker."""
+async def test_readiness_review_vs_hybrid():
+    """Review mode needs a profile, preferences and document consent; hybrid also needs
+    auto-submit consent and a plan that allows auto-submit."""
     user_id = f"user_{uuid.uuid4().hex[:8]}"
 
     mock_db = AsyncMock()
-
-    # 1. No profile -> fails
-    res_empty = MagicMock()
-    res_empty.scalar_one_or_none.return_value = None
-    mock_db.execute.return_value = res_empty
-
-    can_run, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
-    assert can_run is False
-    assert "Profile does not exist" in reason
-
-    # 2. Incomplete profile (<80 score) -> fails
-    incomplete_profile = Profile(
-        user_id=user_id,
-        full_name="Aarav Sharma",
-        email="aarav@example.com",
-        phone="+919876543210",
-        city="Bengaluru",
-        state="Karnataka",
-        country="India",
-        pincode="560001",
-        headline="Software Engineer",
-        summary="Backend developer",
-    )
-    res_prof = MagicMock()
-    res_prof.scalar_one_or_none.return_value = incomplete_profile
-    res_empty_list = MagicMock()
-    res_empty_list.scalars.return_value.all.return_value = []
-
-    mock_db.execute.side_effect = [res_prof, res_empty_list, res_empty_list, res_empty_list]
-    can_run, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
-    assert can_run is False
-    assert "Minimum 80 required" in reason
-
-    # 3. Complete profile (80+), but no DPDP consent -> fails
-    complete_profile = Profile(
-        user_id=user_id,
-        full_name="Aarav Sharma",
-        email="aarav@example.com",
-        phone="+919876543210",
-        city="Bengaluru",
-        state="Karnataka",
-        country="India",
-        pincode="560001",
-        headline="Senior Backend Engineer",
-        summary="Distributed systems and Python expert",
-        current_ctc_lpa=25.0,
-        expected_ctc_lpa=35.0,
-        notice_period_days=30,
-        total_experience_months=48,
-        work_authorization={"India": True},
-    )
-    res_prof_full = MagicMock()
-    res_prof_full.scalar_one_or_none.return_value = complete_profile
-
-    exp = Experience(
-        id=uuid.uuid4(),
-        user_id=user_id,
-        company="Tech Corp",
-        title="Senior Developer",
-        location="Bengaluru",
-        is_current=True,
-        bullets=["Designed scalable distributed services", "Optimized database performance"],
-    )
-    res_exp = MagicMock()
-    res_exp.scalars.return_value.all.return_value = [exp]
-
-    mock_db.add = MagicMock()
-
-    from packages.core.models.profile import Education
-
-    edu = Education(
-        id=uuid.uuid4(),
-        user_id=user_id,
-        institution="IIT Madras",
-        degree="B.Tech",
-        field="Computer Science",
-    )
-    res_edu = MagicMock()
-    res_edu.scalars.return_value.all.return_value = [edu]
-
-    res_no_consent = MagicMock()
-    res_no_consent.scalar_one_or_none.return_value = None
-
-    mock_db.execute.side_effect = [
-        res_prof_full,
-        res_exp,
-        res_edu,
-        res_empty_list,
-        res_no_consent,
-    ]
-    can_run, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
-    assert can_run is False
-    assert "consent for auto_submit" in reason
-
-    # 4. Valid consent, active campaign, valid credits -> passes!
-    res_consent = MagicMock()
-    res_consent.scalar_one_or_none.return_value = Consent(
-        user_id=user_id, purpose="auto_submit", version="v1"
-    )
-
-    campaign = Campaign(
-        id=uuid.uuid4(),
-        user_id=user_id,
-        name="Backend Campaign",
-        status="active",
-        preferences_snapshot={"titles": ["Backend Engineer"]},
-    )
-    res_camp = MagicMock()
-    res_camp.scalar_one_or_none.return_value = campaign
-
-    res_no_recent_failures = MagicMock()
-    res_no_recent_failures.scalars.return_value.all.return_value = []
-
-    mock_db.execute.side_effect = [
-        res_prof_full,
-        res_exp,
-        res_edu,
-        res_empty_list,
-        res_consent,
-        res_camp,
-        res_no_recent_failures,
-    ]
+    res_none = MagicMock()
+    res_none.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = res_none
 
     with (
-        patch("packages.core.services.credits.CreditsService.check_daily_application_cap", new_callable=AsyncMock) as mock_daily,
-        patch("packages.core.services.credits.CreditsService.get_available_balance", new_callable=AsyncMock) as mock_bal,
+        patch("packages.core.services.autopilot.active_consents", new_callable=AsyncMock) as mock_consents,
+        patch("packages.core.services.credits.CreditsService.get_user_plan", new_callable=AsyncMock) as mock_plan,
     ):
-        mock_daily.return_value = {"allowed": True, "limit": 10, "used_today": 0, "remaining": 10}
-        mock_bal.return_value = 25
+        mock_consents.return_value = {}
+        mock_plan.return_value = {"plan": "free", "config": {"name": "Free", "daily_application_limit": 5, "auto_submit_allowed": False}}
 
-        can_run, reason, camp = await AutopilotService.can_run_autopilot(mock_db, user_id)
-        assert can_run is True
-        assert reason is None
-        assert camp.id == campaign.id
+        review = await AutopilotService.readiness(mock_db, user_id, "review")
+        assert review["can_start"] is False
+        assert any("Upload your resume" in b for b in review["blockers"])
+        assert any("preferences" in b for b in review["blockers"])
+        assert any("tailored documents" in b for b in review["blockers"])
+
+        hybrid = await AutopilotService.readiness(mock_db, user_id, "hybrid")
+        assert any("auto-submit" in b for b in hybrid["blockers"])
+        assert any("Upgrade to Pro" in b for b in hybrid["blockers"])
+
+
+@pytest.mark.asyncio
+async def test_can_run_autopilot_guards():
+    """Guards: active campaign, readiness, campaign daily limit, circuit breaker."""
+    user_id = f"user_{uuid.uuid4().hex[:8]}"
+    campaign = Campaign(id=uuid.uuid4(), user_id=user_id, status="active", mode="review", daily_limit=5, preferences_snapshot={})
+
+    def first(value):
+        r = MagicMock()
+        r.scalars.return_value.first.return_value = value
+        return r
+
+    # 1. No active campaign
+    mock_db = AsyncMock()
+    mock_db.execute.return_value = first(None)
+    ok, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
+    assert ok is False and "No active autopilot campaign" in reason
+
+    ready = {"can_start": True, "blockers": []}
+    with (
+        patch.object(AutopilotService, "readiness", new_callable=AsyncMock) as mock_ready,
+        patch.object(AutopilotService, "prepared_today", new_callable=AsyncMock) as mock_today,
+        patch("packages.core.services.credits.CreditsService.check_daily_application_cap", new_callable=AsyncMock) as mock_cap,
+    ):
+        mock_cap.return_value = {"can_apply": True, "daily_limit": 5}
+
+        # 2. Readiness blocker is surfaced
+        mock_ready.return_value = {"can_start": False, "blockers": ["Set your job preferences (at least one target role)."]}
+        mock_db.execute.return_value = first(campaign)
+        ok, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
+        assert ok is False and "preferences" in reason
+
+        # 3. Campaign daily limit reached
+        mock_ready.return_value = ready
+        mock_today.return_value = 5
+        ok, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
+        assert ok is False and "Daily limit of 5" in reason
+
+        # 4. Circuit breaker: 3 recent failures pause the campaign
+        mock_today.return_value = 0
+        failed = MagicMock()
+        failed.status = "failed"
+        recent = MagicMock()
+        recent.scalars.return_value.all.return_value = [failed, failed, failed]
+        mock_db.execute.side_effect = [first(campaign), recent]
+        ok, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
+        assert ok is False and "Paused after 3 failed" in reason
+        assert campaign.status == "paused"
+
+        # 5. All clear
+        campaign.status = "active"
+        ok_recent = MagicMock()
+        ok_recent.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [first(campaign), ok_recent]
+        ok, reason, _ = await AutopilotService.can_run_autopilot(mock_db, user_id)
+        assert ok is True and reason is None
 
 
 @pytest.mark.asyncio
 async def test_company_diversification_and_cycle_execution():
-    """Verify company diversification limits and full autopilot cycle execution."""
+    """Diversification skips over-applied companies and excluded ones; review mode never submits,
+    hybrid submits only very high-fit jobs with no open questions."""
     user_id = f"user_{uuid.uuid4().hex[:8]}"
+    comp_a_id, comp_b_id, comp_c_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 
-    comp_a_id = uuid.uuid4()
-    comp_b_id = uuid.uuid4()
+    def job(company_id, title):
+        return Job(id=uuid.uuid4(), company_id=company_id, title=title, locations=["Bengaluru"],
+                   application_url=f"https://example.com/{title}", ats_type="greenhouse",
+                   source="greenhouse", content_hash=uuid.uuid4().hex)
 
-    job_a1 = Job(
-        id=uuid.uuid4(),
-        company_id=comp_a_id,
-        title="Frontend Dev 1",
-        locations=["Bengaluru"],
-        application_url="https://swiggy.careers/1",
-        ats_type="greenhouse",
-        source="greenhouse",
-        content_hash=uuid.uuid4().hex,
-    )
-    job_a2 = Job(
-        id=uuid.uuid4(),
-        company_id=comp_a_id,
-        title="Frontend Dev 2",
-        locations=["Bengaluru"],
-        application_url="https://swiggy.careers/2",
-        ats_type="greenhouse",
-        source="greenhouse",
-        content_hash=uuid.uuid4().hex,
-    )
-    job_b = Job(
-        id=uuid.uuid4(),
-        company_id=comp_b_id,
-        title="Frontend Dev B",
-        locations=["Gurugram"],
-        application_url="https://zomato.careers/1",
-        ats_type="lever",
-        source="lever",
-        content_hash=uuid.uuid4().hex,
-    )
+    job_a, job_c, job_b = job(comp_a_id, "a"), job(comp_c_id, "c"), job(comp_b_id, "b")
+    match_a = JobMatch(user_id=user_id, job_id=job_a.id, match_score=95, status="new")
+    match_c = JobMatch(user_id=user_id, job_id=job_c.id, match_score=92, status="new")
+    match_b = JobMatch(user_id=user_id, job_id=job_b.id, match_score=85, status="new")
 
-    pv_id = uuid.uuid4()
-    match_a1 = JobMatch(
-        user_id=user_id,
-        job_id=job_a1.id,
-        profile_version_id=pv_id,
-        match_score=90,
-        status="matched",
-    )
-    match_b = JobMatch(
-        user_id=user_id,
-        job_id=job_b.id,
-        profile_version_id=pv_id,
-        match_score=80,
-        status="matched",
-    )
+    applied = MagicMock()
+    applied.scalars.return_value.all.return_value = []
+    company_counts = MagicMock()
+    company_counts.all.return_value = [(comp_a_id, 2)]  # already 2 applications to A this week
+    pref = MagicMock()
+    pref.scalar_one_or_none.return_value = MagicMock(excluded_companies=["Excluded Co"])
+    rows = MagicMock()
+    rows.all.return_value = [(match_a, job_a, "A Corp"), (match_c, job_c, "Excluded Co"), (match_b, job_b, "B Corp")]
 
     mock_db = AsyncMock()
+    mock_db.execute.side_effect = [applied, company_counts, pref, rows]
+    picked = await AutopilotService.select_next_match(mock_db, user_id, 70)
+    assert picked is not None and picked[0].id == job_b.id
 
-    # Simulate user already has 2 applications to company A in past 7 days
-    res_past_apps = MagicMock()
-    res_past_apps.scalars.return_value.all.return_value = [job_a1.id, job_a2.id]
+    # Cycle behaviour per mode
+    plan = MagicMock(unresolved_count=0)
+    for mode, score, expect_status, expect_submit in [
+        ("review", 99, "ready_for_review", False),
+        ("hybrid", 95, "approved", True),
+        ("hybrid", 85, "ready_for_review", False),
+    ]:
+        campaign = Campaign(id=uuid.uuid4(), user_id=user_id, status="active", mode=mode,
+                            daily_limit=10, schedule={"min_match_score": 70, "hybrid_threshold": 90},
+                            preferences_snapshot={})
+        match = JobMatch(user_id=user_id, job_id=job_b.id, match_score=score, status="new")
+        app_obj = MagicMock(id=uuid.uuid4(), status="ready_for_review")
+        db = AsyncMock()
+        db.add = MagicMock()
+        pref_res = MagicMock()
+        pref_res.scalar_one_or_none.return_value = None
+        db.execute.return_value = pref_res
+        with (
+            patch.object(AutopilotService, "can_run_autopilot", new_callable=AsyncMock) as mock_can,
+            patch.object(AutopilotService, "select_next_match", new_callable=AsyncMock) as mock_sel,
+            patch("packages.core.services.applications.ApplicationsService.create_or_get_application", new_callable=AsyncMock) as mock_create,
+            patch("packages.core.services.credits.CreditsService.reserve_hold", new_callable=AsyncMock) as mock_hold,
+            patch("apps.workers.dispatch.enqueue_browser_submission") as mock_enqueue,
+        ):
+            mock_can.return_value = (True, None, campaign)
+            mock_sel.return_value = (job_b, match)
+            mock_create.return_value = (app_obj, plan)
+            mock_hold.return_value = MagicMock(id=uuid.uuid4())
+            res = await AutopilotService.execute_autopilot_cycle(db, user_id)
+        assert res["success"] is True
+        assert app_obj.status == expect_status, mode
+        assert res["auto_submitted"] is expect_submit
+        assert mock_enqueue.called is expect_submit
+        assert match.status == "queued"
 
-    res_past_jobs = MagicMock()
-    res_past_jobs.scalars.return_value.all.return_value = [job_a1, job_a2]
 
-    res_matches = MagicMock()
-    res_matches.scalars.return_value.all.return_value = [match_a1, match_b]
+def test_submission_needs_visible_confirmation() -> None:
+    from apps.browser.executor import submission_confirmed
 
-    res_job_b = MagicMock()
-    res_job_b.scalar_one_or_none.return_value = job_b
+    form = "https://boards.greenhouse.io/acme/jobs/1"
+    assert submission_confirmed("<h1>Thank you for applying!</h1>", form, form)
+    assert submission_confirmed("<p>Done</p>", form, form + "/confirmation")
+    assert not submission_confirmed("<p>Email is required</p>", form, form + "?error=1")
+    assert not submission_confirmed("<form>...</form>", form, form)
 
-    # select_next_job_for_autopilot queries:
-    # 1. applied_job_ids (res_past_apps)
-    # 2. jobs for applied_company_counts (res_past_jobs)
-    # 3. matches (res_matches)
-    # 4. job_b lookup
-    mock_db.execute.side_effect = [res_past_apps, res_past_jobs, res_matches, res_job_b]
 
-    selected_job = await AutopilotService.select_next_job_for_autopilot(mock_db, user_id=user_id)
-    assert selected_job is not None
-    assert selected_job.id == job_b.id
-    assert selected_job.company_id == comp_b_id
+def test_worker_uses_the_reviewed_plan() -> None:
+    import json
 
-    # Test full execute_autopilot_cycle with mocks
-    campaign = Campaign(id=uuid.uuid4(), user_id=user_id, status="active", preferences_snapshot={})
-    with (
-        patch("packages.core.services.autopilot.AutopilotService.can_run_autopilot", new_callable=AsyncMock) as mock_can,
-        patch("packages.core.services.autopilot.AutopilotService.select_next_job_for_autopilot", new_callable=AsyncMock) as mock_sel,
-        patch("packages.core.services.credits.CreditsService.reserve_hold", new_callable=AsyncMock) as mock_hold,
-        patch("apps.workers.tasks.autopilot.execute_browser_application.delay") as mock_delay,
-    ):
-        mock_can.return_value = (True, None, campaign)
-        mock_sel.return_value = job_b
-        mock_hold_obj = MagicMock()
-        mock_hold_obj.id = uuid.uuid4()
-        mock_hold.return_value = mock_hold_obj
-        mock_delay.return_value = MagicMock()
+    from apps.workers.tasks.autopilot import _stored_plan_fields
 
-        mock_db.add = MagicMock()
-        mock_db.flush = AsyncMock()
-        mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock()
-
-        cycle_res = await AutopilotService.execute_autopilot_cycle(mock_db, user_id=user_id, dry_run=True)
-        assert cycle_res["success"] is True
-        assert cycle_res["job_id"] == str(job_b.id)
-        assert cycle_res["company_id"] == str(comp_b_id)
+    plan = {"fields": [{"field_id": "email", "value": "a@b.com"}], "can_auto_submit": True}
+    assert _stored_plan_fields(json.dumps(plan)) == plan["fields"]
+    assert _stored_plan_fields("Candidate approved") == []
+    assert _stored_plan_fields(None) == []

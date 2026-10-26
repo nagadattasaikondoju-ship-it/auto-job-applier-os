@@ -85,6 +85,9 @@ async def test_documents_api_endpoints() -> None:
 
     mock_session = AsyncMock()
     mock_session.commit = AsyncMock()
+    no_row = MagicMock()
+    no_row.scalar_one_or_none.return_value = None
+    mock_session.execute.return_value = no_row
 
     # Mock resume version record
     mock_ver = MagicMock()

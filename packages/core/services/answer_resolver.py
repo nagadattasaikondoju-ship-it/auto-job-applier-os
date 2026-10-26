@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.ai.client import GeminiClient
-from packages.core.models.jobs import Job
+from packages.core.models.jobs import Company, Job
 from packages.core.models.preferences import AnswerBank
 from packages.core.models.profile import Profile
 from packages.core.seed.field_label_synonyms import normalize_field_label
@@ -79,6 +79,10 @@ class AnswerResolutionService:
             "phone": profile.phone,
             "city": profile.city,
             "current_city": profile.city,
+            "location": ", ".join(x for x in [profile.city, profile.country] if x) or None,
+            "current_company": profile.current_company or None,
+            "current_title": profile.current_title or None,
+            "headline": profile.headline or None,
             "linkedin_url": links.get("linkedin") or links.get("LinkedIn"),
             "github_url": links.get("github") or links.get("GitHub"),
             "portfolio_url": links.get("portfolio") or links.get("Portfolio"),
@@ -194,6 +198,9 @@ class AnswerResolutionService:
         question_label: str,
     ) -> str:
         """Ask Gemini for a truthful, concise response grounded strictly in candidate profile."""
+        company_name = (
+            await self.db.execute(select(Company.name).where(Company.id == job.company_id))
+        ).scalar_one_or_none() or "the company"
         prompt = f"""You are drafting a job application response on behalf of a candidate.
 Strict rule: Do not invent facts, tools, degrees, or employers. Ground your response entirely in the candidate's actual background.
 
@@ -205,8 +212,8 @@ City: {profile.city}
 
 Job applying for:
 Title: {job.title}
-Company: {job.company_name}
-Job Description: {job.description[:1000]}
+Company: {company_name}
+Job Description: {(job.description_text or "")[:1000]}
 
 Application Question:
 "{question_label}"

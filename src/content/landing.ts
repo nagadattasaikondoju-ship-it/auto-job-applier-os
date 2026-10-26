@@ -56,8 +56,9 @@ export const landingContent = {
     titleLine2: "Interview sooner.",
     subtext:
       "AI-powered job applications for India's next generation of professionals. Discover matching roles, tailor your resume, autofill applications, and manage your job hunt from one dashboard.",
-    cta: "Join the waitlist",
-    inputPlaceholder: "Enter your work or personal email...",
+    cta: "Apply for jobs",
+    secondaryCta: "See how it works",
+    note: "Upload your resume, get a free ATS score in under a minute, then let Applyon find and prepare applications for you.",
     badge: "✦ Now with GPT-5 support & verified India tech salary benchmarks ✨",
     dashboardFigcaption:
       "Applyon dashboard showing a 92% job fit score, tailored resume and autofilled application for Indian tech roles",
@@ -385,8 +386,8 @@ export const landingContent = {
   },
   finalCta: {
     heading: "Your next interview is one great application away.",
-    subheading: "Join the Applyon waitlist — free during beta for job seekers across India. No credit card required.",
-    cta: "Join priority waitlist",
+    subheading: "Upload your resume, fix it for ATS, tell us what you want, and Applyon starts finding and preparing applications for you. Free to start, no credit card.",
+    cta: "Apply for jobs",
   },
   faqs: [
     {

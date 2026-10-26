@@ -1,4 +1,7 @@
+from typing import Any
+
 from celery import Celery
+from celery.signals import worker_ready
 from kombu import Exchange, Queue
 
 from packages.core.config import settings
@@ -11,6 +14,7 @@ celery_app = Celery(
     include=[
         "apps.workers.tasks.task_status",
         "apps.workers.tasks.jobs",
+        "apps.workers.tasks.autopilot",
     ],
 )
 
@@ -47,6 +51,22 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
 )
 
+# Periodic schedule (run `celery -A apps.workers.celery_app beat`)
+celery_app.conf.beat_schedule = {
+    "discover-jobs-hourly": {"task": "jobs.discover_all", "schedule": 60 * 60},
+    "match-users-every-30-min": {"task": "jobs.match_all_users", "schedule": 30 * 60},
+    "autopilot-every-15-min": {"task": "autopilot.tick", "schedule": 15 * 60},
+}
+
+
+
+@worker_ready.connect
+def _discover_on_start(**_: Any) -> None:
+    """A fresh deploy has no jobs yet; search once now instead of waiting for the hourly run."""
+    celery_app.send_task("jobs.discover_all")
+
+
 # Explicitly import tasks for registration
+import apps.workers.tasks.autopilot  # noqa: F401, E402
 import apps.workers.tasks.jobs  # noqa: F401, E402
 import apps.workers.tasks.task_status  # noqa: F401, E402

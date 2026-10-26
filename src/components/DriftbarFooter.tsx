@@ -87,13 +87,13 @@ export function DriftbarFooter() {
               Applyon — AI-powered job applications for India. Tailor your resume, autofill forms, and manage your job hunt from one unified dashboard.
             </p>
 
-            {/* Waitlist CTA Button */}
+            {/* Primary CTA */}
             <div className="mt-5">
               <a
-                href="#hero"
+                href="/signup"
                 className="inline-flex items-center gap-2 h-[34px] px-4 rounded-[7px] bg-[#0c0c0c] hover:bg-[#262626] text-white text-[12px] font-medium transition-all hover:-translate-y-0.5 cursor-pointer shadow-xs"
               >
-                <span>Get early access today</span>
+                <span>Apply for jobs</span>
               </a>
             </div>
 
@@ -113,11 +113,11 @@ export function DriftbarFooter() {
             <ul className="mt-4 flex flex-wrap gap-2 list-none p-0" aria-label="Applyon status">
               <li className="inline-flex items-center gap-2 h-[26px] px-3 rounded-full border border-[rgba(12,12,12,0.12)] bg-white/60 text-[11px] font-medium text-[#0c0c0c] backdrop-blur-xs">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#2fb36a] ring-2 ring-[#2fb36a]/20" aria-hidden="true" />
-                <span>3,800+ Job seekers on waitlist</span>
+                <span>Free ATS resume check</span>
               </li>
 
               <li className="inline-flex items-center gap-1.5 h-[26px] px-3 rounded-full border border-[rgba(12,12,12,0.12)] bg-white/60 text-[11px] font-medium text-[#0c0c0c] backdrop-blur-xs">
-                <span>v1.0 · Beta launching soon</span>
+                <span>You approve every application</span>
               </li>
 
               <li className="inline-flex items-center gap-1.5 h-[26px] px-3 rounded-full border border-[rgba(12,12,12,0.12)] bg-white/60 text-[11px] font-medium text-[#0c0c0c] backdrop-blur-xs">

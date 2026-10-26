@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,10 +41,10 @@ class Settings(BaseSettings):
 
     # Gemini AI
     gemini_api_key: str = ""
-    gemini_model_lite: str = "gemini-1.5-flash-8b"
-    gemini_model_fast: str = "gemini-1.5-flash"
-    gemini_model_smart: str = "gemini-1.5-pro"
-    gemini_embed_model: str = "text-embedding-004"
+    gemini_model_lite: str = "gemini-3.1-flash-lite"
+    gemini_model_fast: str = "gemini-3.5-flash"
+    gemini_model_smart: str = "gemini-3.5-flash"
+    gemini_embed_model: str = "gemini-embedding-001"
 
     # Job Ingestion
     adzuna_app_id: str = ""
@@ -71,9 +71,33 @@ class Settings(BaseSettings):
         ]
     )
 
+    # Hosted previews only: accept "dev-token-<uid>" logins without Firebase. Anyone can sign in
+    # as anyone, so never enable this for real users.
+    allow_dev_login: bool = False
+
     # Observability
     sentry_dsn: str = ""
     extension_id: str = ""
+
+    @field_validator("database_url")
+    @classmethod
+    def _async_driver(cls, v: str) -> str:
+        """Hosts hand out postgres:// URLs; the app needs the asyncpg driver."""
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+asyncpg://" + v[len(prefix) :]
+        return v
+
+    @field_validator("direct_database_url")
+    @classmethod
+    def _plain_driver(cls, v: str) -> str:
+        if v.startswith("postgres://"):
+            return "postgresql://" + v[len("postgres://") :]
+        return v.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    @property
+    def dev_login_enabled(self) -> bool:
+        return self.app_env in ("development", "test") or self.allow_dev_login
 
 
 settings = Settings()

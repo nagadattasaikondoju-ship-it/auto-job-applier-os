@@ -1,6 +1,5 @@
 """Job management service: ingestion, deduplication, preference buckets, and feed querying."""
 
-import uuid
 from datetime import datetime
 from typing import Any
 
@@ -142,7 +141,7 @@ async def ingest_normalized_job(
 
 async def assign_user_to_preference_buckets(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    user_id: str,
     roles: list[str],
     seniority: str,
     locations: list[str],
@@ -170,7 +169,7 @@ async def assign_user_to_preference_buckets(
 
 async def get_jobs_feed(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    user_id: str,
     cursor: datetime | None = None,
     limit: int = 20,
     min_match_score: int | None = None,

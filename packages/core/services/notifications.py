@@ -59,7 +59,8 @@ class NotificationsService:
                 if resp.status_code >= 400:
                     logger.error(f"Resend email error {resp.status_code}: {resp.text}")
                     return {"success": False, "status_code": resp.status_code, "error": resp.text}
-                return resp.json()
+                data: dict[str, Any] = resp.json()
+                return data
         except Exception as e:
             logger.error(f"Failed to deliver email to {to_email}: {e}")
             return {"success": False, "error": str(e)}
@@ -225,4 +226,4 @@ class NotificationsService:
         )
         res = await db.execute(stmt)
         await db.commit()
-        return res.rowcount or 0
+        return int(getattr(res, "rowcount", 0) or 0)

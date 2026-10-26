@@ -56,7 +56,7 @@ class ParsedResumeOutput(BaseModel):
     country: str = "India"
     headline: str = ""
     summary: str = ""
-    total_experience_months: int = 0
+    total_experience_months: int = Field(default=0, ge=0, le=600)
     current_title: str = ""
     current_company: str = ""
     experiences: list[ParsedExperience] = Field(default_factory=list)
@@ -116,3 +116,13 @@ class SingleScreeningAnswer(BaseModel):
 
 class ScreeningAnswersOutput(BaseModel):
     answers: list[SingleScreeningAnswer]
+
+
+class BulletRewrite(BaseModel):
+    bullet_id: str
+    rewritten: str = Field(..., description="Stronger version using ONLY facts present in the original bullet")
+    reason: str = Field(..., description="Short explanation of what was improved")
+
+
+class BulletRewriteOutput(BaseModel):
+    rewrites: list[BulletRewrite]

@@ -10,6 +10,8 @@ from apps.api.routers import (
     analytics,
     answers,
     applications,
+    ats,
+    autopilot,
     consents,
     credits,
     documents,
@@ -20,6 +22,7 @@ from apps.api.routers import (
     me,
     notifications,
     onboarding,
+    preferences,
     privacy,
     profile,
     resumes,
@@ -132,3 +135,6 @@ app.include_router(credits.router, prefix="/v1")
 app.include_router(notifications.router, prefix="/v1")
 app.include_router(analytics.router, prefix="/v1")
 app.include_router(privacy.router, prefix="/v1")
+app.include_router(ats.router, prefix="/v1")
+app.include_router(preferences.router, prefix="/v1")
+app.include_router(autopilot.router, prefix="/v1")

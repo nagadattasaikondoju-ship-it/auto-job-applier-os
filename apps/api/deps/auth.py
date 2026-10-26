@@ -61,7 +61,7 @@ async def get_current_user(
     Supports local dev bypass via X-Dev-User-Id header or mock token when in development/test.
     """
     # 1. Dev/Test bypass for rapid local development
-    if settings.app_env in ("development", "test"):
+    if settings.dev_login_enabled:
         if x_dev_user_id:
             return AuthenticatedUser(
                 user_id=x_dev_user_id,
@@ -89,7 +89,7 @@ async def get_current_user(
     token = creds.credentials
 
     # 2. Check for local dev token
-    if settings.app_env in ("development", "test") and token.startswith("dev-token-"):
+    if settings.dev_login_enabled and token.startswith("dev-token-"):
         uid = token.replace("dev-token-", "")
         return AuthenticatedUser(
             user_id=uid,

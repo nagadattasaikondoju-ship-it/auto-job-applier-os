@@ -28,7 +28,7 @@ async def list_matches(
         select(JobMatch, Job, Company.name.label("company_name"))
         .join(Job, JobMatch.job_id == Job.id)
         .join(Company, Job.company_id == Company.id)
-        .where(JobMatch.user_id == current_user.id)
+        .where(JobMatch.user_id == current_user.user_id)
     )
 
     if decision:
@@ -72,7 +72,7 @@ async def refresh_matches(
     """Trigger the multi-stage matching funnel to discover new matching jobs immediately."""
     new_matches = await run_matching_funnel_for_user(
         session=session,
-        user_id=current_user.id,
+        user_id=current_user.user_id,
     )
     return {
         "status": "completed",
