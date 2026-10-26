@@ -4,13 +4,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EMPTY_PREFERENCES, PREFERENCE_STEPS, type PrefValue } from "@/components/app/preferences-form";
-import { Button, Card, ErrorState, PageHeader, Spinner } from "@/components/app/ui";
+import { Button, Card, ErrorState, PageHeader, SERVER_WAKING_HINT, Spinner } from "@/components/app/ui";
 import { api } from "@/lib/api/endpoints";
 import type { Preferences } from "@/lib/api/types";
 
 export default function PreferencesPage() {
   const prefs = useQuery({ queryKey: ["preferences"], queryFn: api.preferences.get });
-  if (prefs.isPending) return <Spinner label="Loading your preferences" />;
+  if (prefs.isPending) return <Spinner label="Loading your preferences" slowHint={SERVER_WAKING_HINT} />;
   if (prefs.isError) return <ErrorState error={prefs.error} onRetry={() => prefs.refetch()} />;
   return <PreferencesEditor initial={prefs.data} />;
 }

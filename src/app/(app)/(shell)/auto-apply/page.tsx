@@ -5,7 +5,7 @@ import { AlertTriangle, Pause, Play, RotateCcw, Search, Zap } from "lucide-react
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge, Button, ButtonLink, Card, CardHeader, ErrorState, PageHeader, ProgressBar, Spinner } from "@/components/app/ui";
+import { Badge, Button, ButtonLink, Card, CardHeader, ErrorState, PageHeader, ProgressBar, SERVER_WAKING_HINT, Spinner } from "@/components/app/ui";
 import { ApiError } from "@/lib/api/client";
 import { api } from "@/lib/api/endpoints";
 import type { ApplyMode, AutopilotState } from "@/lib/api/types";
@@ -19,7 +19,7 @@ export default function AutoApplyPage() {
     // Poll quickly while the first batch is being prepared in the background
     refetchInterval: (q) => (q.state.data?.campaign?.preparing ? 4_000 : 30_000),
   });
-  if (state.isPending) return <Spinner label="Loading auto-apply" />;
+  if (state.isPending) return <Spinner label="Loading auto-apply" slowHint={SERVER_WAKING_HINT} />;
   if (state.isError) return <ErrorState error={state.error} onRetry={() => state.refetch()} />;
   return <AutoApply data={state.data} />;
 }

@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { AtsOptimizer } from "@/components/app/ats-optimizer";
 import { AppLogo } from "@/components/app/logo";
 import { EMPTY_PREFERENCES, PREFERENCE_STEPS, type PrefValue } from "@/components/app/preferences-form";
-import { Badge, Button, Card, Checkbox, ErrorState, ProgressBar, Spinner, Textarea } from "@/components/app/ui";
+import { Badge, Button, Card, Checkbox, ErrorState, ProgressBar, SERVER_WAKING_HINT, Spinner, Textarea } from "@/components/app/ui";
 import { ApiError } from "@/lib/api/client";
 import { api } from "@/lib/api/endpoints";
 import type { AtsReport, ConsentPurpose, FullProfile, ParsedResume, Seniority, UploadResumeResult } from "@/lib/api/types";
@@ -31,13 +31,16 @@ export default function OnboardingPage() {
   // Resume where the user left off: no profile → upload; no preferences → preferences; else launch.
   const profile = useQuery({ queryKey: ["profile"], queryFn: api.profile.get, retry: false });
   const prefs = useQuery({ queryKey: ["preferences"], queryFn: api.preferences.get, retry: false });
-  const inferred: Step | null = profile.isError
+  // Only "no profile yet" (404) means upload; any other failure is shown with a retry, never a wrong step
+  const noProfile = profile.error instanceof ApiError && profile.error.status === 404;
+  const inferred: Step | null = noProfile
     ? "upload"
     : profile.isSuccess && prefs.isSuccess
       ? prefs.data.exists
         ? "launch"
         : "preferences"
       : null;
+  const loadError = (!noProfile && profile.error) || prefs.error;
   const step = chosen ?? inferred;
   const index = STEPS.findIndex((s) => s.id === step);
 
@@ -70,7 +73,18 @@ export default function OnboardingPage() {
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-4 pb-20 pt-2">
-        {!step && <Spinner label="Getting things ready" />}
+        {!step &&
+          (loadError ? (
+            <ErrorState
+              error={loadError}
+              onRetry={() => {
+                void profile.refetch();
+                void prefs.refetch();
+              }}
+            />
+          ) : (
+            <Spinner label="Getting things ready" slowHint={SERVER_WAKING_HINT} />
+          ))}
         {step === "upload" && (
           <UploadStep
             onUploaded={(r) => {
@@ -409,7 +423,7 @@ function PreferencesStep({ onBack, onDone }: { onBack: () => void; onDone: () =>
     onError: (e) => toast.error(e.message),
   });
 
-  if (existing.isPending || profile.isPending) return <Spinner />;
+  if (existing.isPending || profile.isPending) return <Spinner slowHint={SERVER_WAKING_HINT} />;
   if (existing.isError) return <ErrorState error={existing.error} onRetry={() => existing.refetch()} />;
 
   // First time through, start from what the resume already tells us
