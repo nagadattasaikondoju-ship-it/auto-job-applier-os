@@ -26,16 +26,11 @@ services:
     dockerfilePath: ./infra/Dockerfile
     dockerContext: .
     healthCheckPath: /health/ready
-    # Free plan: the background worker (job search, matching, auto-apply, browser submissions)
-    # runs inside this same container. Free services sleep after 15 idle minutes, so scheduled
-    # work pauses until the next visit. For always-on work, uncomment applyon-worker below
-    # (Starter plan, ~$7/month) and remove the celery line here.
-    dockerCommand: >-
-      sh -c "alembic upgrade head &&
-      python -m packages.core.seed.load_companies &&
-      (celery -A apps.workers.celery_app.celery_app worker --beat --pool=solo --loglevel=info
-      --queues=job_ingestion,embeddings,ai_matching,document_generation,form_schema,browser_automation,autopilot,notifications,maintenance,priority &) &&
-      uvicorn apps.api.main:app --host 0.0.0.0 --port $PORT"
+    # Start-up is infra/start.sh (the image's default command): migrations, company list, the
+    # background worker (job search, matching, auto-apply, browser submissions) and the API, all in
+    # this one free service. Free services sleep after 15 idle minutes, so scheduled work pauses
+    # until the next visit. For always-on work, uncomment applyon-worker below (Starter, ~$7/month)
+    # and set RUN_WORKER_IN_API=false here.
     envVars: &backendEnv
       - key: APP_ENV
         value: production
@@ -79,6 +74,6 @@ services:
 #   dockerfilePath: ./infra/Dockerfile
 #   dockerContext: .
 #   dockerCommand: >-
-#     celery -A apps.workers.celery_app.celery_app worker --beat --loglevel=info --concurrency=2
+#     /app/.venv/bin/python -m celery -A apps.workers.celery_app.celery_app worker --beat --loglevel=info --concurrency=2
 #     --queues=job_ingestion,embeddings,ai_matching,document_generation,form_schema,browser_automation,autopilot,notifications,maintenance,priority
 #   envVars: *backendEnv

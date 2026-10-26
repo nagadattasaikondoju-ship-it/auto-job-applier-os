@@ -27,7 +27,7 @@ Costs: everything runs on Render's free plans; no card is needed. Limits:
 - The worker shares 512 MB with the API (tested: ~460 MB peak while Chromium submits a form).
 
 For always-on background work, uncomment `applyon-worker` in `render.yaml` (Starter, ~$7/month)
-and remove the `celery …&` line from the API's start command.
+and set `RUN_WORKER_IN_API=false` on `applyon-api`.
 
 ## 2. Point the website at the API
 
