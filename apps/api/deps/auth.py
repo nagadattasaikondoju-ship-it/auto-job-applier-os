@@ -1,14 +1,18 @@
+import logging
 import time
 import uuid
 from typing import Any
 
 import httpx
 import jwt
+from cryptography.x509 import load_pem_x509_certificate
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from packages.core.config import settings
+
+logger = logging.getLogger("applyon.auth")
 
 security = HTTPBearer(auto_error=False)
 
@@ -106,10 +110,11 @@ async def get_current_user(
             kid = unverified_header.get("kid")
             keys = await fetch_firebase_public_keys()
             if kid and kid in keys:
-                cert = keys[kid]
+                # Google publishes X.509 certificates; PyJWT needs the public key inside them
+                public_key = load_pem_x509_certificate(keys[kid].encode()).public_key()
                 decoded = jwt.decode(
                     token,
-                    cert,
+                    public_key,  # type: ignore[arg-type]
                     algorithms=["RS256"],
                     audience=settings.firebase_project_id,
                     issuer=f"https://securetoken.google.com/{settings.firebase_project_id}",
@@ -121,9 +126,9 @@ async def get_current_user(
                     role="authenticated",
                     claims=decoded,
                 )
-        except Exception:
+        except Exception as e:
             # Try fallback to standard secret or Supabase
-            pass
+            logger.info("Firebase token rejected: %s", e)
 
     # 4. Fallback: Supabase / HS256 secret verification
     if settings.jwt_secret_key:
