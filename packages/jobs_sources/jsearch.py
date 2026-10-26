@@ -1,5 +1,9 @@
-"""JSearch (OpenWebNinja) connector: Google for Jobs listings, which include LinkedIn, Naukri,
-Indeed and company career sites.
+"""OpenWebNinja job search connectors.
+
+- JSearch: Google for Jobs listings, which include LinkedIn, Naukri, Indeed and company career sites.
+- Real-Time Jobs Data: the same Google for Jobs search plus Indeed and LinkedIn searched directly.
+
+Both APIs return the same job fields, so one normalizer serves every endpoint.
 
 When a listing can be applied to on a public Greenhouse, Lever or Ashby board, that link is
 preferred (Applyon can auto-apply there) and the company's board token is recorded so the
@@ -77,6 +81,8 @@ def _salary_lpa(item: dict[str, Any]) -> tuple[float | None, float | None]:
         return None, None
     if (item.get("job_country") or "").upper() != "IN":
         return None, None
+    if (item.get("job_salary_currency") or "INR").upper() != "INR":
+        return None, None
     period = (item.get("job_salary_period") or "YEAR").upper()
     factor = {"YEAR": 1, "MONTH": 12}.get(period)
     if factor is None:
@@ -91,48 +97,31 @@ def _salary_lpa(item: dict[str, Any]) -> tuple[float | None, float | None]:
     return round(lo / 100_000, 2), round(hi / 100_000, 2)
 
 
-class JSearchConnector(BaseJobConnector):
-    """Searches JSearch for one query (e.g. "Data Analyst jobs in Bengaluru")."""
+class OpenWebNinjaJobsConnector(BaseJobConnector):
+    """One search call against an OpenWebNinja jobs endpoint (x-api-key auth)."""
 
-    def __init__(
-        self,
-        query: str,
-        country: str = "in",
-        date_posted: str = "week",
-        num_pages: int = 1,
-    ) -> None:
-        self.query = query
-        self.country = country
-        self.date_posted = date_posted
-        self.num_pages = num_pages
+    def __init__(self, source: str, url: str, params: dict[str, str | int], api_key: str) -> None:
+        self._source = source
+        self.url = url
+        self.params = params
+        self.api_key = api_key
 
     @property
     def source_name(self) -> str:
-        return "jsearch"
+        return self._source
 
     async def fetch(self, since: datetime | None = None) -> list[RawJob]:
-        if not settings.jsearch_api_key:
-            logger.info("JSearch API key not configured; skipping.")
+        if not self.api_key:
+            logger.info("%s API key not configured; skipping.", self._source)
             return []
-
-        params: dict[str, str | int] = {
-            "query": self.query,
-            "country": self.country,
-            "date_posted": self.date_posted,
-            "num_pages": self.num_pages,
-        }
         try:
-            async with httpx.AsyncClient(timeout=45.0) as client:
-                resp = await client.get(
-                    f"{settings.jsearch_base_url.rstrip('/')}/search-v2",
-                    params=params,
-                    headers={"x-api-key": settings.jsearch_api_key},
-                )
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(self.url, params=self.params, headers={"x-api-key": self.api_key})
         except Exception as e:
-            logger.error("Error fetching JSearch jobs: %s", e)
+            logger.error("Error fetching %s jobs: %s", self._source, e)
             return []
         if resp.status_code != 200:
-            logger.warning("JSearch returned status %d for %r", resp.status_code, self.query)
+            logger.warning("%s returned status %d for %r", self._source, resp.status_code, self.params.get("query"))
             return []
         return [self.to_raw(item) for item in extract_items(resp.json()) if item.get("job_id")]
 
@@ -229,3 +218,47 @@ def extract_items(payload: Any) -> list[dict[str, Any]]:
     if isinstance(data, dict):
         data = data.get("jobs") or data.get("data") or []
     return [d for d in (data or []) if isinstance(d, dict)]
+
+
+class JSearchConnector(OpenWebNinjaJobsConnector):
+    """JSearch search-v2, e.g. query="Data Analyst jobs in Bengaluru"."""
+
+    def __init__(self, query: str, country: str = "in", date_posted: str = "week", num_pages: int = 1) -> None:
+        super().__init__(
+            source="jsearch",
+            url=f"{settings.jsearch_base_url.rstrip('/')}/search-v2",
+            params={"query": query, "country": country, "date_posted": date_posted, "num_pages": num_pages},
+            api_key=settings.jsearch_api_key,
+        )
+        self.query = query
+
+
+# Real-Time Jobs Data endpoints Applyon can search, with how each wants role and city
+REALTIME_SOURCES = ("google_jobs", "indeed", "linkedin")
+
+
+def realtime_jobs_connector(source: str, role: str, city: str) -> OpenWebNinjaJobsConnector:
+    """Build a Real-Time Jobs Data search for one role and city (city "India" means country-wide)."""
+    base = settings.realtime_jobs_base_url.rstrip("/")
+    whole_country = city.strip().lower() == "india"
+    params: dict[str, str | int] = {"country": "in", "date_posted": "week"}
+    if source == "google_jobs":
+        path = "google-jobs/search"
+        params["query"] = f"{role} jobs in {'India' if whole_country else city}"
+    elif source == "indeed":
+        path = "indeed/search"
+        params["query"] = role
+        if not whole_country:
+            params["location"] = city
+    elif source == "linkedin":
+        path = "linkedin/search"
+        params["query"] = role
+        params["location"] = "India" if whole_country else f"{city}, India"
+    else:
+        raise ValueError(f"Unknown Real-Time Jobs Data source: {source}")
+    return OpenWebNinjaJobsConnector(
+        source=source,
+        url=f"{base}/{path}",
+        params=params,
+        api_key=settings.realtime_jobs_api_key or settings.jsearch_api_key,
+    )

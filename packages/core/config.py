@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     # JSearch (OpenWebNinja): Google for Jobs listings incl. LinkedIn/Naukri/company sites
     jsearch_api_key: str = ""
     jsearch_base_url: str = "https://api.openwebninja.com/jsearch"
+    # Real-Time Jobs Data (OpenWebNinja): Google for Jobs, Indeed and LinkedIn searches.
+    # Falls back to JSEARCH_API_KEY when unset (one OpenWebNinja account key).
+    realtime_jobs_api_key: str = ""
+    realtime_jobs_base_url: str = "https://api.openwebninja.com/realtime-jobs-data"
+    # Each listed source costs one credit per (role, city) search
+    realtime_jobs_sources: list[str] = Field(default_factory=lambda: ["google_jobs", "indeed", "linkedin"])
     crawler_user_agent: str = "ApplyonBot/1.0 (+https://applyon.in/bot)"
 
     # Transactional Email (Resend)
