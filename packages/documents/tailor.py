@@ -14,9 +14,11 @@ from packages.ai.schemas import CoverLetterOutput, ScreeningAnswersOutput, Tailo
 from packages.ai.truth_checker import verify_resume_truthfulness
 from packages.core.config import settings
 from packages.core.models.jobs import Company, Job
-from packages.core.models.matching import CoverLetter, JobMatch, ResumeVersion
+from packages.core.models.matching import CoverLetter, ResumeVersion
+from packages.core.models.preferences import JobPreference
 from packages.core.models.profile import Profile, ProfileVersion
 from packages.core.services.profile import create_profile_snapshot_for_user
+from packages.documents.ats_optimizer import optimize_resume_for_job
 from packages.documents.export import (
     build_resume_document,
     cover_letter_pdf_bytes,
@@ -31,6 +33,7 @@ TONE_GUIDE = {
 }
 
 logger = logging.getLogger("applyon.documents.tailor")
+
 
 
 async def tailor_resume_for_job(
@@ -66,40 +69,24 @@ async def tailor_resume_for_job(
     if not job:
         raise ValueError(f"Job not found {job_id}")
 
-    match_stmt = select(JobMatch).where(
-        JobMatch.job_id == job_id,
-        JobMatch.user_id == user_id,
+    company_name = (
+        await session.execute(select(Company.name).where(Company.id == job.company_id))
+    ).scalar_one_or_none() or ""
+    pref = (await session.execute(select(JobPreference).where(JobPreference.user_id == user_id))).scalar_one_or_none()
+
+    # 3. Job-targeted ATS resume (AI rewrite + deterministic guards; rules-only when AI is down)
+    result = await optimize_resume_for_job(
+        snapshot_json,
+        f"{job.title}\n{job.description_text or ''}\n{' '.join(job.required_skills or [])}",
+        job_title=job.title,
+        company=company_name,
+        seniority=pref.seniority if pref else "",
+        target_role=", ".join((pref.target_roles or [])[:3]) if pref else "",
+        location=", ".join(x for x in [profile.city, profile.country] if x),
     )
-    match = (await session.execute(match_stmt)).scalar_one_or_none()
-    resume_focus = match.resume_focus if match else []
+    tailored = TailoredResumeOutput(**result["content"])
 
-    # 3. Call Gemini to tailor resume
-    system_instruction = (
-        "You are an expert ATS resume tailoring engine. Your job is to emphasize relevant experience, "
-        "reorder skills, and highlight matching achievements. You must NEVER invent companies, degrees, "
-        "titles, dates, metrics, or tools that do not appear in the candidate profile snapshot. "
-        "Every single bullet must link back to its source_bullet_id."
-    )
-
-    prompt = f"""Target Job Title: {job.title}
-Job Description: {job.description_text[:1200]}
-Resume Focus Areas: {", ".join(resume_focus) if resume_focus else "Core role requirements"}
-
-Candidate Master Profile Snapshot (Absolute Source of Truth):
-{snapshot_json}
-
-Tailor the summary, experiences, and skills for this role without adding any unverified facts.
-"""
-
-    tailored: TailoredResumeOutput = await gemini_client.generate_structured(
-        model_name=settings.gemini_model_smart,
-        system_instruction=system_instruction,
-        prompt=prompt,
-        response_model=TailoredResumeOutput,
-        prompt_version="v2_tailoring",
-    )
-
-    # 4. Deterministic Truth Checker
+    # 4. Deterministic truth check
     truth_result = verify_resume_truthfulness(
         tailored_resume=tailored,
         profile_snapshot=snapshot_json,
@@ -128,7 +115,14 @@ Tailor the summary, experiences, and skills for this role without adding any unv
         user_id=user_id,
         job_id=job_id,
         profile_version_id=profile_version.id,
-        content_json=tailored.model_dump(),
+        content_json={
+            **tailored.model_dump(),
+            "source": "job_tailor",
+            "report": {k: result[k] for k in (
+                "before", "after", "keywords", "missing_information", "development_recommendations",
+                "final_recommendation", "verdict", "ai_used",
+            )},
+        },
         template_id="classic_ats",
         pdf_path=str(pdf_path),
         truth_check_status=truth_result.status,

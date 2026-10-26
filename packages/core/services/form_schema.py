@@ -79,7 +79,7 @@ def infer_field_type_and_key(label: str, raw_type: str | None = None) -> tuple[s
             canonical = "current_ctc_lpa"
         elif "expected ctc" in norm_label:
             canonical = "expected_ctc_lpa"
-        elif "experience" in norm_label:
+        elif "experience" in norm_label and re.search(r"years|how many|total experience", norm_label):
             canonical = "total_experience_years"
 
     return ftype, canonical

@@ -1,5 +1,6 @@
 """Documents API router: resume tailoring, resume versions, PDF/DOCX export and cover letters."""
 
+import re
 import uuid
 from typing import Any, Literal
 
@@ -59,7 +60,15 @@ async def _job_jd(session: AsyncSession, job_id: uuid.UUID | None) -> str | None
     if not job_id:
         return None
     job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
-    return f"{job.title}\n{job.description_text or ''}\n{' '.join(job.required_skills or [])}" if job else None
+    if not job:
+        return None
+    text = f"{job.title}\n{job.description_text or ''}\n{' '.join(job.required_skills or [])}"
+    # The hiring company's own name isn't a keyword the candidate is missing
+    company = (await session.execute(select(Company.name).where(Company.id == job.company_id))).scalar_one_or_none()
+    for name in {company or "", *(company or "").split()}:
+        if len(name) > 2:
+            text = re.sub(rf"\b{re.escape(name)}\b", " ", text, flags=re.I)
+    return text
 
 
 async def _owned_version(session: AsyncSession, user_id: str, resume_id: uuid.UUID) -> ResumeVersion:
@@ -198,9 +207,11 @@ async def list_resume_versions(
     for ver, job_title, company in rows:
         d = _version_dict(ver)
         d.pop("content", None)
-        d["job_title"] = job_title
-        d["company"] = company
-        d["kind"] = "tailored" if ver.job_id else "optimized"
+        content = ver.content_json or {}
+        # Job-optimized versions made from a pasted job description carry the job in their content
+        d["job_title"] = job_title or content.get("job_title")
+        d["company"] = company or content.get("company")
+        d["kind"] = "tailored" if ver.job_id or content.get("source") == "ats_job_optimizer" else "optimized"
         items.append(d)
     return {"items": items}
 

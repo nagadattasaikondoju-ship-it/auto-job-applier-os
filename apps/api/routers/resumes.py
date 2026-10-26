@@ -15,9 +15,11 @@ from packages.ai.schemas import ParsedResumeOutput
 from packages.core.config import settings
 from packages.core.models.preferences import JobPreference
 from packages.core.models.profile import (
+    Certification,
     Education,
     Experience,
     Profile,
+    Project,
     Resume,
     Skill,
 )
@@ -47,13 +49,15 @@ async def _parse_resume_text(raw_text: str) -> dict[str, Any]:
             model_name=settings.gemini_model_smart,
             system_instruction=(
                 "You are an expert resume parser for Indian and international tech talent. "
-                "Extract candidate personal info, categorized skills, and work experiences with quantifiable metrics. "
-                "Give every experience bullet a unique id (b1, b2, ...). "
-                "Do NOT hallucinate facts not present in the text."
+                "Extract personal info, a short headline (the person's role, never contact details), work "
+                "experience with every bullet copied word for word, education (degree, field, institution, "
+                "years, grade), projects, certifications and skills. Write names in normal capitalisation. "
+                "Keep the company name separate from its city. Give every experience bullet a unique id "
+                "(b1, b2, ...). Do NOT invent or reword facts that are not in the text."
             ),
             prompt=raw_text,
             response_model=ParsedResumeOutput,
-            prompt_version="v1",
+            prompt_version="v2",
         )
     except AIUnavailableError:
         # Never block onboarding on the AI provider: read the real text with rules instead.
@@ -68,7 +72,7 @@ def _sanity_check(parsed: dict[str, Any], raw_text: str) -> dict[str, Any]:
     so the user never loses data that is visibly in their resume.
     """
     rules = heuristic_parse(raw_text)
-    for key in ("experiences", "educations", "skills"):
+    for key in ("experiences", "educations", "skills", "projects", "certifications"):
         if not parsed.get(key) and rules.get(key):
             parsed[key] = rules[key]
     months = parsed.get("total_experience_months") or 0
@@ -268,7 +272,7 @@ async def confirm_resume_profile(
         profile.links = {**(profile.links or {}), **(data.get("links") or {})}
 
     # Confirming a resume replaces the previous resume-derived sections instead of duplicating them
-    for model in (Experience, Education, Skill):
+    for model in (Experience, Education, Skill, Project, Certification):
         await db.execute(delete(model).where(model.user_id == current_user.user_id))
 
     # 2. Add Experiences
@@ -298,6 +302,8 @@ async def confirm_resume_profile(
             institution=edu_data.get("institution", ""),
             degree=edu_data.get("degree", ""),
             field=edu_data.get("field", ""),
+            start_date=edu_data.get("start_date") or "",
+            end_date=edu_data.get("end_date") or "",
             grade=edu_data.get("grade", ""),
         )
         db.add(edu)
@@ -319,17 +325,45 @@ async def confirm_resume_profile(
         db.add(skill)
         created_skills.append(skill)
 
+    # 5. Projects and certifications
+    created_projects = [
+        Project(
+            id=uuid.uuid4(),
+            user_id=current_user.user_id,
+            title=(p.get("title") or "")[:128],
+            description=p.get("description") or "",
+            role=p.get("role") or "",
+            url=p.get("url"),
+            skills=p.get("skills") or [],
+        )
+        for p in data.get("projects", [])
+        if p.get("title")
+    ]
+    created_certifications = [
+        Certification(
+            id=uuid.uuid4(),
+            user_id=current_user.user_id,
+            name=(c.get("name") or "")[:255],
+            issuer=(c.get("issuer") or "")[:128],
+            issue_date=c.get("issue_date") or "",
+            credential_url=c.get("credential_url"),
+        )
+        for c in data.get("certifications", [])
+        if c.get("name")
+    ]
+    db.add_all([*created_projects, *created_certifications])
+
     await db.commit()
 
-    # 5. Create immutable profile snapshot
+    # 6. Create immutable profile snapshot
     version = await create_profile_version(
         session=db,
         user_id=current_user.user_id,
         profile=profile,
         experiences=created_experiences,
         educations=created_educations,
-        projects=[],
-        certifications=[],
+        projects=created_projects,
+        certifications=created_certifications,
         skills=created_skills,
     )
 

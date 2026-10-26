@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
 from packages.core.models.profile import (
+    Certification,
     Education,
     Experience,
     Profile,
+    Project,
     Skill,
 )
 from packages.core.services.profile import (
@@ -81,6 +83,10 @@ async def get_my_profile(
     experiences = (await db.execute(exp_stmt)).scalars().all()
     educations = (await db.execute(edu_stmt)).scalars().all()
     skills = (await db.execute(skill_stmt)).scalars().all()
+    projects = (await db.execute(select(Project).where(Project.user_id == current_user.user_id))).scalars().all()
+    certifications = (
+        await db.execute(select(Certification).where(Certification.user_id == current_user.user_id))
+    ).scalars().all()
 
     completeness = compute_profile_completeness(
         profile, list(experiences), list(educations), list(skills)
@@ -138,6 +144,14 @@ async def get_my_profile(
                 "proficiency": s.proficiency,
             }
             for s in skills
+        ],
+        "projects": [
+            {"id": str(p.id), "title": p.title, "description": p.description, "url": p.url, "skills": p.skills}
+            for p in projects
+        ],
+        "certifications": [
+            {"id": str(c.id), "name": c.name, "issuer": c.issuer, "issue_date": c.issue_date}
+            for c in certifications
         ],
         "completeness": completeness,
     }

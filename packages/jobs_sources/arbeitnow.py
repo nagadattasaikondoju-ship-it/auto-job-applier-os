@@ -86,7 +86,8 @@ class ArbeitnowConnector(BaseJobConnector):
         """Convert Arbeitnow RawJob to standardized JobIn."""
         desc_html = raw.description_raw or ""
         desc_unescaped = html.unescape(desc_html)
-        desc_text = re.sub(r"<[^>]+>", " ", desc_unescaped)
+        # Some boards escape twice ("&amp;nbsp;"): unescape again after removing tags
+        desc_text = html.unescape(re.sub(r"<[^>]+>", " ", desc_unescaped))
         desc_text = re.sub(r"\s+", " ", desc_text).strip()
 
         norm_title, seniority = extract_seniority(raw.title)

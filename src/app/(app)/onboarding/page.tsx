@@ -312,6 +312,27 @@ function ReviewStep({
             {skills.length === 0 && <p className="text-app-muted">No skills found.</p>}
           </div>
         </div>
+        {((parsed.projects ?? []).length > 0 || (parsed.certifications ?? []).length > 0) && (
+          <div className="p-5">
+            <h2 className="font-medium">Projects & certifications</h2>
+            <ul className="mt-2 flex flex-col gap-1 text-app-ink-2">
+              {(parsed.projects ?? []).map((pr, i) => (
+                <li key={`p${i}`}>
+                  <span className="text-app-ink">{pr.title}</span>
+                  {pr.description && <span className="text-app-muted"> · {pr.description}</span>}
+                </li>
+              ))}
+              {(parsed.certifications ?? []).map((ce, i) => (
+                <li key={`c${i}`}>
+                  <span className="text-app-ink">{ce.name}</span>
+                  {(ce.issuer || ce.issue_date) && (
+                    <span className="text-app-muted"> · {[ce.issuer, ce.issue_date].filter(Boolean).join(", ")}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Card>
 
       <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">

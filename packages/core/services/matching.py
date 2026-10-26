@@ -3,7 +3,7 @@
 import json
 import logging
 
-from sqlalchemy import ColumnElement, func, not_, or_, select
+from sqlalchemy import ColumnElement, and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.ai.client import gemini_client
@@ -21,6 +21,7 @@ from packages.core.models.profile import (
 )
 from packages.core.redis import get_async_redis
 from packages.core.services.match_rules import (
+    FOREIGN_LOCATION_REGEX,
     estimate_experience_years,
     location_patterns,
     role_title_patterns,
@@ -100,12 +101,23 @@ async def run_matching_funnel_for_user(
         c.lower() == "remote" for c in (preferences.locations or [])
     )
     city_patterns = location_patterns(preferences.locations or [])
+    # Remote, but not restricted to another country ("Remote - United States")
+    remote_in_reach = and_(
+        Job.remote_mode == "remote",
+        or_(
+            Job.location_raw.is_(None),
+            Job.location_raw.ilike("%india%"),
+            not_(Job.location_raw.op("~*")(FOREIGN_LOCATION_REGEX)),
+        ),
+    )
     if city_patterns:
         loc_clauses: list[ColumnElement[bool]] = [Job.location_raw.ilike(p) for p in city_patterns]
         if allows_remote:
-            loc_clauses.append(Job.remote_mode == "remote")
+            loc_clauses.append(remote_in_reach)
         filter_conditions.append(or_(*loc_clauses))
-    elif not allows_remote and preferences.remote_mode:
+    elif allows_remote:
+        filter_conditions.append(remote_in_reach)
+    elif preferences.remote_mode:
         filter_conditions.append(Job.remote_mode.in_(preferences.remote_mode))
 
     if preferences.excluded_companies:

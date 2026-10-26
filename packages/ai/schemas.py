@@ -39,6 +39,13 @@ class ParsedProject(BaseModel):
     skills: list[str] = Field(default_factory=list)
 
 
+class ParsedCertification(BaseModel):
+    name: str
+    issuer: str = ""
+    issue_date: str = ""
+    credential_url: str | None = None
+
+
 class ParsedSkill(BaseModel):
     name: str
     normalized_name: str
@@ -62,6 +69,7 @@ class ParsedResumeOutput(BaseModel):
     experiences: list[ParsedExperience] = Field(default_factory=list)
     educations: list[ParsedEducation] = Field(default_factory=list)
     projects: list[ParsedProject] = Field(default_factory=list)
+    certifications: list[ParsedCertification] = Field(default_factory=list)
     skills: list[ParsedSkill] = Field(default_factory=list)
 
 
@@ -126,3 +134,39 @@ class BulletRewrite(BaseModel):
 
 class BulletRewriteOutput(BaseModel):
     rewrites: list[BulletRewrite]
+
+
+# ---------------------------------------------------------------- job-targeted ATS resume
+
+
+class JobDescriptionAnalysis(BaseModel):
+    role_title: str = ""
+    title_variants: list[str] = Field(default_factory=list)
+    hard_skills: list[str] = Field(default_factory=list)
+    soft_skills: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    must_have: list[str] = Field(default_factory=list)
+    nice_to_have: list[str] = Field(default_factory=list)
+    seniority: str = ""
+    industry_terms: list[str] = Field(default_factory=list)
+
+
+class OptimizedBullet(BaseModel):
+    source_bullet_id: str = Field(..., description="id of the original bullet this rewrites")
+    text: str
+
+
+class OptimizedExperience(BaseModel):
+    experience_id: str
+    bullets: list[OptimizedBullet]
+
+
+class AtsResumeOutput(BaseModel):
+    job_analysis: JobDescriptionAnalysis
+    summary: str
+    core_skills: list[str]
+    experiences: list[OptimizedExperience]
+    changes_made: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    development_recommendations: list[str] = Field(default_factory=list)
+    final_recommendation: str = ""

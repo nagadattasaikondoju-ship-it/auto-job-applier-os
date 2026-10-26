@@ -45,10 +45,17 @@ class Settings(BaseSettings):
     gemini_model_fast: str = "gemini-3.5-flash"
     gemini_model_smart: str = "gemini-3.5-flash"
     gemini_embed_model: str = "gemini-embedding-001"
+    # Tried in order when the chosen model is overloaded or out of free quota (each model has its own quota)
+    gemini_fallback_models: list[str] = Field(
+        default_factory=lambda: ["gemini-3.5-flash-lite", "gemini-3-flash-preview"]
+    )
 
     # Job Ingestion
     adzuna_app_id: str = ""
     adzuna_app_key: str = ""
+    # JSearch (OpenWebNinja): Google for Jobs listings incl. LinkedIn/Naukri/company sites
+    jsearch_api_key: str = ""
+    jsearch_base_url: str = "https://api.openwebninja.com/jsearch"
     crawler_user_agent: str = "ApplyonBot/1.0 (+https://applyon.in/bot)"
 
     # Transactional Email (Resend)
