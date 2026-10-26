@@ -44,6 +44,19 @@ CITY_ALIASES: dict[str, list[str]] = {
     "kolkata": ["kolkata", "calcutta"],
 }
 
+# Remote jobs restricted to another country ("Remote - United States", "New York, NY")
+FOREIGN_LOCATION_REGEX = (
+    # Written so Python's re and Postgres ~* both accept it (no \b / \m)
+    r"(united states|(^|[^a-z])usa?([^a-z]|$)|united kingdom|(^|[^a-z])uk([^a-z]|$)|london|new york|san francisco|seattle|canada|toronto|"
+    r"australia|germany|berlin|singapore|dubai|uae|philippines|mexico|brazil|ireland|netherlands|"
+    r", (?!in(;|$))[a-z]{2}(;|$))"  # "City, ST" (US/CA style), but not "Bangalore, IN"
+)
+
+
+def is_foreign_location(location: str) -> bool:
+    return bool(re.search(FOREIGN_LOCATION_REGEX, location or "", re.I)) and "india" not in (location or "").lower()
+
+
 _SENIOR_TITLE = re.compile(r"\b(senior|sr\.?|lead|principal|staff|head|director|vp|vice president|architect|manager)\b", re.I)
 # Too senior for a mid-level (3–6 years) candidate, though "Senior Engineer" is often fine
 _LEAD_TITLE = re.compile(

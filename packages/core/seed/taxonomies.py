@@ -113,6 +113,7 @@ SKILL_TAXONOMY: dict[str, list[str]] = {
         "Hadoop",
         "Tableau",
         "Power BI",
+        "Looker",
         "Excel",
     ],
     "mobile": ["Kotlin", "Swift", "Flutter", "Android", "iOS"],

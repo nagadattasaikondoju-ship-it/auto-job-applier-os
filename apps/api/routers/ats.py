@@ -1,5 +1,6 @@
 """ATS optimizer: scan a resume, suggest truthful bullet rewrites, and save an optimized version."""
 
+import re
 import uuid
 from typing import Any
 
@@ -53,6 +54,11 @@ class ApplyRequest(BaseModel):
     bullet_updates: list[BulletRef] = []
     summary: str | None = Field(default=None, max_length=2000)
     add_skills: list[str] = []
+
+
+def _same_text(a: str, b: str) -> bool:
+    """Equal apart from case and punctuation."""
+    return re.sub(r"[^a-z0-9]+", " ", a.lower()).strip() == re.sub(r"[^a-z0-9]+", " ", b.lower()).strip()
 
 
 def _ai_available() -> bool:
@@ -188,8 +194,10 @@ async def rewrite_bullets(
         result: BulletRewriteOutput = await gemini_client.generate_structured(
             model_name=settings.gemini_model_fast,
             system_instruction=(
-                "You rewrite resume bullets to be ATS-friendly: start with a strong action verb, be specific, "
-                "15-30 words. Use ONLY facts in the original bullet. Never add numbers, tools, companies, "
+                "You rewrite resume bullets to be ATS-friendly: start with a strong past-tense action verb and "
+                "say concretely what was done. Keep it about as long as the original (at most 30 words); never "
+                "pad with generic phrases like 'to drive results' or 'to support optimization'. If the original is "
+                "already strong, return it unchanged. Use ONLY facts in the original bullet. Never add numbers, tools, companies, "
                 "team sizes or results that are not in the original. If the original has no number, do not invent one."
             ),
             prompt=(
@@ -206,6 +214,8 @@ async def rewrite_bullets(
     for t in targets:
         r = by_id.get(t.bullet_id)
         rewritten = r.rewritten.strip() if r else None
+        if rewritten and _same_text(rewritten, t.text):
+            continue  # already strong: nothing to suggest
         blocked = verify_rewrite(t.text, rewritten, skills) if rewritten else None
         suggestions.append(
             {
@@ -254,7 +264,9 @@ async def apply_optimizations(
                 break
             new_b = dict(b) if isinstance(b, dict) else {}
             new_b.setdefault("id", upd.bullet_id)
-            new_b["text"] = upd.text.strip()
+            text = upd.text.strip()
+            # Match the resume's own style: no trailing full stop if the original had none
+            new_b["text"] = text.rstrip(".") if not original.rstrip().endswith(".") else text
             bullets[i] = new_b
             changes.append(f"Rewrote a bullet at {exp.company}")
             break

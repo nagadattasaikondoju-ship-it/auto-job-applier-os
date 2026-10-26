@@ -102,13 +102,21 @@ def has_metric(s: str) -> bool:
     return bool(re.search(r"\d+\s*(%|x|k|m|cr|lpa|l\b|ms|hrs?|users|customers|clients)|[₹$]\s?\d|\d{2,}", s, re.I))
 
 
+# Short skill names that are real skills in job posts even though they're plain capitals
+_TECH_ACRONYMS = {
+    "ai", "ml", "nlp", "llm", "llms", "ui", "ux", "qa", "bi", "etl", "elt", "api", "apis", "rest", "saas", "seo",
+    "sem", "crm", "erp", "sap", "gcp", "azure", "mlops", "devops", "sre", "tdd", "oop", "dsa", "sql", "nosql",
+}
+
 # Skills that are also everyday English words only count when capitalised ("Go", not "go live")
 _CASE_SENSITIVE_SKILLS = {"Go", "Express", "Swift", "Excel", "Spark", "Git", "Vite", "Android", "Linux"}
 
 # Levels, role abbreviations, degrees and web domains look like tech tokens but aren't skills
 _NOT_A_SKILL = re.compile(
-    r"^(I{1,3}|IV|VI{0,3}|SDE\d?|SWE|SDET|(?!(AI|ML|UI|UX|QA|BI|R)$)[A-Z]{1,2}"  # levels, role abbreviations, initials ("RV")
+    r"^(I{1,3}|IV|VI{0,3}|SDE\d?|SWE|SDET|(?!(AI|ML|UI|UX|QA|BI|R)$)[A-Z]{1,2}|[A-Z]\d"  # levels, role abbreviations, initials ("RV")
     r"|[BM]\.?(Tech|E|Sc|Com|A|S)|MBA|BCA|MCA|PhD|CGPA|GPA|SGPA"  # degrees and grades
+    r"|ROI|KPIs?|OKRs?|SLAs?|P&L|CTC|LPA|USD|INR"  # business terms, not skills
+    r"|[A-Za-z]+-[a-z]+"  # "AI-led", "AI-first"
     r"|[\w-]+\.(com|io|in|ai|co|org|net|dev)(/.*)?)$",  # web domains
     re.I,
 )
@@ -131,7 +139,8 @@ def _keywords_from(text: str) -> set[str]:
             continue
         if len(t) > 1 and t.lower() not in _STOPWORDS and (any(c.isupper() for c in t[1:]) or re.search(r"[+#.\d]", t)):
             found.add(t)
-    return found
+    # Drop fragments of longer skills that were also found ("BI" inside "Power BI")
+    return {k for k in found if not any(k != o and re.search(rf"\b{re.escape(k)}\b", o) for o in found)}
 
 
 def _norm(k: str) -> str:
@@ -143,7 +152,14 @@ def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str
     lower = text.lower()
     words = re.findall(r"\b\w+\b", text)
     word_count = len(words)
-    bullets = _bullets(text)
+    # Only experience and project lines are bullets; a summary paragraph or a skills list is not
+    secs = _split_sections(text)
+    body = [
+        ln
+        for ln in secs.get("experience", []) + secs.get("projects", [])
+        if re.match(r"^[\-•\*●▪–>•]", ln) or not re.search(r"\b(?:19|20)\d{2}\b|present", ln, re.I)
+    ]
+    bullets = _bullets("\n".join(body)) if body else _bullets(text)
     issues: list[dict[str, str]] = []
     categories: list[dict[str, Any]] = []
 
@@ -217,8 +233,15 @@ def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str
     # 4. Keywords (25)
     resume_kw = _keywords_from(text)
     resume_norm = {_norm(k) for k in resume_kw}
+    # Known skills plus tech-style tokens (C++, Node.js, Neo4J); other capitalised words are usually
+    # names of brands, colleges or events (InMobi, JNTU, IPL) rather than skills
+    known = {sk.lower() for sk in ALL_SKILLS} | _TECH_ACRONYMS
+
+    def is_skill(k: str) -> bool:
+        return k.lower() in known or bool(re.search(r"[+#.\d]", k))
+
     if jd_text and jd_text.strip():
-        jd_kw = _keywords_from(jd_text)
+        jd_kw = {k for k in _keywords_from(jd_text) if is_skill(k)}
         matched = sorted(k for k in jd_kw if _norm(k) in resume_norm or k.lower() in lower)
         missing = sorted(k for k in jd_kw if k not in matched)
         coverage = len(matched) / max(1, len(jd_kw))
@@ -227,12 +250,15 @@ def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str
         if missing:
             add_issue("high" if coverage < 0.5 else "medium", "Missing job keywords", f"The job mentions {len(missing)} skills your resume doesn't: {', '.join(missing[:8])}{'…' if len(missing) > 8 else ''}.", "Add the ones you genuinely have, in your skills and in the bullet where you used them. Don't add skills you don't have.", "keywords")
     else:
-        matched = sorted(resume_kw)
+        # The skills the person listed themselves, plus recognised tools mentioned anywhere
+        listed = _parse_skills(secs.get("skills", []), "") if secs.get("skills") else []
+        general = {k for k in resume_kw if is_skill(k)} | set(listed)
+        matched = sorted(general, key=str.lower)
         missing = []
-        keyword_score = round(25 * min(1.0, len(resume_kw) / 12))
+        keyword_score = round(25 * min(1.0, len(general) / 12))
         keyword_source = "general"
-        if len(resume_kw) < 8:
-            add_issue("medium", "Few recognisable skills", f"We found only {len(resume_kw)} skills or tools.", "List the specific tools, languages and platforms you use (e.g. Python, SQL, Figma, AWS).", "keywords")
+        if len(general) < 8:
+            add_issue("medium", "Few recognisable skills", f"We found only {len(general)} skills or tools.", "List the specific tools, languages and platforms you use (e.g. Python, SQL, Figma, AWS).", "keywords")
     categories.append({"key": "keywords", "label": "Keyword match", "score": keyword_score, "max": 25, "source": keyword_source})
 
     # 5. Formatting and parseability (15)
@@ -249,7 +275,8 @@ def analyze_resume(text: str, jd_text: str | None = None, target_roles: list[str
         add_issue("low", "First-person pronouns", f"“I/me/my” appears {pronouns} times.", "Write bullets without pronouns: “Built X”, not “I built X”.", "formatting")
     date_formats = {
         "month_year": len(re.findall(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{4}\b", lower)),
-        "numeric": len(re.findall(r"\b\d{1,2}/\d{2,4}\b", text)),
+        # "01/2023", but not a grade like "8.6/10"
+        "numeric": len(re.findall(r"(?<![\d.])(?:0?[1-9]|1[0-2])/(?:19|20)\d{2}\b", text)),
     }
     if date_formats["month_year"] and date_formats["numeric"]:
         fmt -= 2
@@ -340,8 +367,11 @@ def profile_snapshot_to_text(snapshot: dict[str, Any]) -> str:
 
 
 _HEADING_RE = re.compile(
-    r"^(summary|profile|objective|about me|experience|work experience|employment|work history|internships?|"
-    r"education|academics?|skills|technical skills|tech stack|projects?|certifications?|courses|achievements|awards)\s*:?$",
+    r"^(?:professional|work|technical|key|core|academic|relevant|personal|career|other)?\s*"
+    r"(summary|profile|objective|about me|experience|employment|work history|internships?|"
+    r"education|academics?|qualifications?|skills|tech stack|technologies|projects?|"
+    r"certifications?|certificates?|courses|achievements|awards)"
+    r"(?:\s*(?:&|and)\s*\w+)?\s*:?$",
     re.I,
 )
 
@@ -360,8 +390,119 @@ def _split_sections(text: str) -> dict[str, list[str]]:
     return sections
 
 
+_CITIES = (
+    "Bengaluru|Bangalore|Hyderabad|Pune|Mumbai|Navi Mumbai|Thane|New Delhi|Delhi|Gurugram|Gurgaon|Noida|"
+    "Chennai|Kolkata|Ahmedabad|Jaipur|Kochi|Coimbatore|Indore|Chandigarh|Lucknow|Bhubaneswar|Mysuru|"
+    "Mysore|Vadodara|Nagpur|Visakhapatnam|Trivandrum|Thiruvananthapuram|Remote"
+)
+_CITY_RE = re.compile(rf"\b({_CITIES})\b", re.I)
+_LINK_RE = re.compile(r"linkedin\.com|github\.com|https?://|www\.", re.I)
+_DATE_RE = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}|\d{4}|present|current"
+_DEGREE_RE = re.compile(
+    r"^(B\.?\s?Tech|B\.?\s?E\.?|M\.?\s?Tech|M\.?\s?E\.?|B\.?\s?Sc|M\.?\s?Sc|BCA|MCA|MBA|PGDM|B\.?\s?Com|M\.?\s?Com|BBA|"
+    r"B\.?\s?A\.?|M\.?\s?A\.?|Ph\.?\s?D|Diploma|Bachelor(?:'s)?(?: of [A-Za-z ]+)?|Master(?:'s)?(?: of [A-Za-z ]+)?|"
+    r"Class (?:X|XII|10|12)|HSC|SSC)\b\.?(?:\s+(?:in|of)\s+(.+))?",
+    re.I,
+)
+_GRADE_RE = re.compile(
+    r"((?:CGPA|GPA|SGPA)\s*[:\-]?\s*\d+(?:\.\d+)?(?:\s*/\s*\d+)?|\d+(?:\.\d+)?\s*(?:/\s*10\s*)?(?:CGPA|GPA)|\d{2}(?:\.\d+)?\s*%)",
+    re.I,
+)
+_ISSUERS = (
+    "Google", "Microsoft", "AWS", "Amazon", "Coursera", "Udemy", "Oracle", "IBM", "Meta", "NPTEL", "Cisco",
+    "Salesforce", "HubSpot", "Scrum Alliance", "PMI", "Tableau", "Databricks", "Snowflake", "edX", "Infosys",
+)
+
+
+def _strip_location(company: str) -> tuple[str, str]:
+    """'Swiggy, Hyderabad' -> ('Swiggy', 'Hyderabad')."""
+    parts = [p.strip() for p in re.split(r"\s*[,|]\s*", company) if p.strip()]
+    if len(parts) > 1 and _CITY_RE.fullmatch(parts[-1]):
+        return ", ".join(parts[:-1]), parts[-1]
+    return company, ""
+
+
+def _parse_education(lines: list[str]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for ln in lines[:6]:
+        grade = _GRADE_RE.search(ln)
+        years = re.findall(r"\b(?:19|20)\d{2}\b", ln)
+        rest = _GRADE_RE.sub("", ln)
+        rest = re.sub(r"\(?\b(?:19|20)\d{2}\b\s*(?:[-–]\s*(?:\b(?:19|20)\d{2}\b|present))?\)?", "", rest, flags=re.I)
+        parts = [p.strip(" -–|()") for p in re.split(r"\s*[,|]\s*|\s+-\s+", rest) if p.strip(" -–|()")]
+        degree, field, institution_parts = "", "", []
+        for part in parts:
+            m = _DEGREE_RE.match(part)
+            if m and not degree:
+                degree = part[: m.start(2)].strip().removesuffix(" in").removesuffix(" of") if m.group(2) else part
+                field = (m.group(2) or "").strip()
+            else:
+                institution_parts.append(part)
+        entry = {
+            "institution": ", ".join(institution_parts),
+            "degree": degree,
+            "field": field,
+            "start_date": years[0] if len(years) > 1 else "",
+            "end_date": years[-1] if years else "",
+            "grade": grade.group(1).strip() if grade else "",
+        }
+        # A line with only an institution or only a grade continues the previous entry
+        if out and not degree and (not out[-1]["institution"] or not entry["institution"]):
+            prev = out[-1]
+            prev["institution"] = prev["institution"] or entry["institution"]
+            prev["grade"] = prev["grade"] or entry["grade"]
+            prev["end_date"] = prev["end_date"] or entry["end_date"]
+            continue
+        if degree or entry["institution"]:
+            out.append(entry)
+    return out
+
+
+def _parse_projects(lines: list[str]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for ln in lines:
+        is_bullet = bool(re.match(r"^[\-•\*●▪>]", ln))
+        txt = re.sub(r"^[\-•\*●▪>]+\s*", "", ln)
+        if is_bullet and out:
+            out[-1]["description"] = (out[-1]["description"] + " " + txt).strip()
+            continue
+        title, _, desc = txt.partition(":") if ":" in txt[:80] else txt.partition(" - ")
+        out.append({"title": title.strip()[:128], "description": desc.strip(), "role": "", "url": None, "skills": []})
+    for p in out:
+        p["skills"] = sorted(_keywords_from(p["description"]))[:8]
+    return [p for p in out if p["title"]][:8]
+
+
+def _parse_certifications(lines: list[str]) -> list[dict[str, Any]]:
+    out = []
+    for ln in lines[:10]:
+        txt = re.sub(r"^[\-•\*●▪>]+\s*", "", ln)
+        year = re.search(r"\b(?:19|20)\d{2}\b", txt)
+        name = re.sub(r"\s*[(\[,–-]?\s*\b(?:19|20)\d{2}\b\s*[)\]]?\s*$", "", txt).strip(" ,-–")
+        issuer = next((i for i in _ISSUERS if re.search(rf"\b{re.escape(i)}\b", name, re.I)), "")
+        if name:
+            out.append({"name": name[:255], "issuer": issuer, "issue_date": year.group(0) if year else "", "credential_url": None})
+    return out
+
+
+def _parse_skills(lines: list[str], text: str) -> list[str]:
+    if lines:
+        items: list[str] = []
+        for ln in lines:
+            ln = re.sub(r"^[\-•\*●▪>]+\s*", "", ln)
+            ln = re.sub(r"^[A-Za-z /&]{2,30}:\s*", "", ln)  # "Languages: Python, SQL"
+            items += [x.strip(" .") for x in re.split(r"\s*[,|;•]\s*(?![^()]*\))", ln) if x.strip(" .")]
+        seen: dict[str, str] = {}
+        for it in items:
+            if 1 <= len(it) <= 40 and it.lower() not in seen:
+                seen[it.lower()] = it
+        if seen:
+            return list(seen.values())[:40]
+    return sorted(_keywords_from(text))[:40]
+
+
 def heuristic_parse(text: str) -> dict[str, Any]:
-    """Rule-based resume parser used when no AI key is configured.
+    """Rule-based resume parser used when the AI parser is unavailable.
 
     Less complete than the AI parser, but it only ever returns facts that are in the text.
     """
@@ -369,36 +510,44 @@ def heuristic_parse(text: str) -> dict[str, Any]:
     header = sections.get("_header", [])
     email = re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", text)
     phone = re.search(r"(\+?\d[\d\s\-()]{8,}\d)", text)
-    city = re.search(r"\b(Bengaluru|Bangalore|Hyderabad|Pune|Mumbai|Delhi|Gurugram|Gurgaon|Noida|Chennai|Kolkata|Ahmedabad)\b", text, re.I)
-    name = next((h for h in header if 1 < len(h.split()) <= 5 and "@" not in h and not re.search(r"\d", h)), "")
-    headline = next((h for h in header[1:4] if h != name and "@" not in h and not re.search(r"\d{5,}", h)), "")
+    city = _CITY_RE.search(" ".join(header)) or _CITY_RE.search(text)
+    name = next((h for h in header if 1 < len(h.split()) <= 5 and "@" not in h and not re.search(r"\d|\|", h)), "")
+    if name.isupper():
+        name = name.title()
+    headline = ""
+    for h in header[1:4]:
+        seg = h.split("|")[0].strip()
+        if seg and seg != name and "@" not in seg and not re.search(r"\d", seg) and not _LINK_RE.search(seg) and not _CITY_RE.fullmatch(seg):
+            headline = seg
+            break
 
     experiences: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     for ln in sections.get("experience", []):
-        is_bullet = bool(re.match(r"^[\-•\*●▪>•]", ln))
+        is_bullet = bool(re.match(r"^[\-•\*●▪>]", ln))
         if is_bullet and current is not None:
-            txt = re.sub(r"^[\-•\*●▪>•]+\s*", "", ln)
+            txt = re.sub(r"^[\-•\*●▪>]+\s*", "", ln)
             current["bullets"].append({"id": f"b{len(experiences)}_{len(current['bullets']) + 1}", "text": txt})
         elif not is_bullet:
-            dates = re.findall(r"((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}|\d{4}|present|current)", ln, re.I)
-            head = re.sub(r"\(?((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}|\d{4}|present|current)\)?", "", ln, flags=re.I)
+            dates = re.findall(rf"({_DATE_RE})", ln, re.I)
+            if current is not None and not dates and current["bullets"] and len(ln.split()) > 6:
+                # Wrapped bullet text without a bullet marker
+                current["bullets"][-1]["text"] += " " + ln
+                continue
+            head = re.sub(rf"\(?({_DATE_RE})\)?", "", ln, flags=re.I)
             head = re.sub(r"[\s\-–|,]+$", "", head).strip()
-            parts = re.split(r"\s+(?:at|@)\s+|\s*[,|–]\s*|\s+-\s+", head, maxsplit=1)
+            parts = re.split(r"\s+(?:at|@)\s+|\s+[-–|]\s+|\s*,\s*", head, maxsplit=1)
+            company, location = _strip_location(parts[1].strip() if len(parts) > 1 else "")
             current = {
                 "title": parts[0].strip() if parts else head,
-                "company": parts[1].strip() if len(parts) > 1 else "",
+                "company": company,
+                "location": location,
                 "start_date": dates[0] if dates else "",
                 "end_date": dates[1] if len(dates) > 1 and dates[1].lower() not in ("present", "current") else None,
                 "is_current": any(d.lower() in ("present", "current") for d in dates),
                 "bullets": [],
             }
             experiences.append(current)
-
-    educations = []
-    for ln in sections.get("education", [])[:4]:
-        grade = re.search(r"(\d\.\d+\s*(?:cgpa|gpa)|\d{2}(?:\.\d+)?\s*%)", ln, re.I)
-        educations.append({"institution": ln, "degree": "", "field": "", "grade": grade.group(1) if grade else ""})
 
     links: dict[str, str] = {}
     for key, pattern in (
@@ -409,9 +558,7 @@ def heuristic_parse(text: str) -> dict[str, Any]:
         if m:
             links[key] = m.group(0) if m.group(0).startswith("http") else f"https://{m.group(0)}"
 
-    skills_text = " ".join(sections.get("skills", [])) or text
-    skills = sorted(_keywords_from(skills_text))[:40]
-
+    experiences = [e for e in experiences if e["title"]]
     return {
         "full_name": name or "Your name",
         "email": email.group(0) if email else "",
@@ -419,13 +566,18 @@ def heuristic_parse(text: str) -> dict[str, Any]:
         "city": city.group(1).title() if city else "",
         "state": "",
         "country": "India",
-        "headline": headline,
+        "headline": headline or (experiences[0]["title"] if experiences else ""),
         "summary": " ".join(sections.get("summary", []))[:1200],
         "total_experience_months": 0,
         "current_title": experiences[0]["title"] if experiences else "",
         "current_company": experiences[0]["company"] if experiences else "",
         "links": links,
-        "experiences": [e for e in experiences if e["title"]],
-        "educations": educations,
-        "skills": [{"name": s, "category": "technical"} for s in skills],
+        "experiences": experiences,
+        "educations": _parse_education(sections.get("education", [])),
+        "projects": _parse_projects(sections.get("projects", [])),
+        "certifications": _parse_certifications(sections.get("certifications", [])),
+        "skills": [
+            {"name": s, "normalized_name": s.lower(), "category": "technical"}
+            for s in _parse_skills(sections.get("skills", []), text)
+        ],
     }

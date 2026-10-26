@@ -255,3 +255,92 @@ def test_settings_accept_hosted_database_urls() -> None:
     assert s.direct_database_url == "postgresql://u:p@db.render.com/applyon"
     assert not s.dev_login_enabled
     assert Settings(app_env="production", allow_dev_login=True).dev_login_enabled
+
+
+REALISTIC = """SNEHA IYER
+Data Analyst | Hyderabad, Telangana | +91 90000 12345 | sneha.iyer@example.com
+linkedin.com/in/sneha-iyer-data | github.com/snehaiyer
+PROFESSIONAL SUMMARY
+Data analyst with 2.5 years of experience in SQL, Python and Power BI.
+WORK EXPERIENCE
+Data Analyst - Swiggy, Hyderabad Jul 2023 - Present
+- Built Power BI dashboards tracking delivery SLAs across 40 cities
+- Responsible for A/B test analysis for the checkout team
+Business Analyst Intern - Razorpay, Bengaluru Jan 2023 - Jun 2023
+- Automated a monthly MIS report with Python, saving the team 2 days a month
+PROJECTS
+Zomato Restaurant Rating Predictor: Python, XGBoost, Streamlit; 0.82 R2 on 50k restaurants
+SKILLS
+SQL, Python, pandas, Power BI, Excel, A/B testing
+EDUCATION
+B.Tech in Computer Science, JNTU Hyderabad, 2019 - 2023, CGPA 8.6/10
+CERTIFICATIONS
+Microsoft PL-300: Power BI Data Analyst (2024)
+"""
+
+
+def test_heuristic_parse_handles_a_realistic_resume() -> None:
+    p = heuristic_parse(REALISTIC)
+    assert (p["full_name"], p["headline"], p["city"]) == ("Sneha Iyer", "Data Analyst", "Hyderabad")
+    assert p["summary"].startswith("Data analyst with 2.5 years")
+    first = p["experiences"][0]
+    assert (first["title"], first["company"], first["location"], first["is_current"]) == ("Data Analyst", "Swiggy", "Hyderabad", True)
+    assert p["experiences"][1]["company"] == "Razorpay"
+    edu = p["educations"][0]
+    assert (edu["degree"], edu["field"], edu["institution"], edu["grade"]) == ("B.Tech", "Computer Science", "JNTU Hyderabad", "CGPA 8.6/10")
+    assert [s["name"] for s in p["skills"]] == ["SQL", "Python", "pandas", "Power BI", "Excel", "A/B testing"]
+    assert p["projects"][0]["title"] == "Zomato Restaurant Rating Predictor"
+    assert "R2" not in p["projects"][0]["skills"]
+    assert p["certifications"] == [
+        {"name": "Microsoft PL-300: Power BI Data Analyst", "issuer": "Microsoft", "issue_date": "2024", "credential_url": None}
+    ]
+
+
+def test_ats_ignores_grades_summaries_and_keyword_fragments() -> None:
+    r = analyze_resume(REALISTIC, jd_text="Data Analyst with SQL, Power BI and Looker")
+    titles = {i["title"] for i in r["issues"]}
+    assert "Inconsistent date formats" not in titles  # "8.6/10" is a grade, not a date
+    weak = [w["text"] for w in r["weak_bullets"]]
+    assert "Responsible for A/B test analysis for the checkout team" in weak
+    assert not any(w.startswith(("Data analyst with", "SQL, Python")) for w in weak)
+    assert "BI" not in r["keywords"]["matched"] and "Power BI" in r["keywords"]["matched"]
+    assert r["keywords"]["missing"] == ["Looker"]
+
+
+def test_jd_keywords_skip_business_terms_and_hyphenated_words() -> None:
+    r = analyze_resume(STRONG, jd_text="AI-led product team. Own RoI and KPIs. Use React and Looker.")
+    assert r["keywords"]["missing"] == ["Looker"]
+
+
+def test_tailored_bullets_that_add_claims_fall_back_to_the_original() -> None:
+    from packages.ai.schemas import TailoredBullet, TailoredExperience, TailoredResumeOutput
+    from packages.documents.tailor import keep_bullets_close_to_source
+
+    snap = {"experiences": [{"id": "e1", "bullets": [
+        {"id": "b1", "text": "Responsible for A/B test analysis for the checkout team"},
+        {"id": "b2", "text": "Wrote SQL models in BigQuery that cut reporting time from 6 hours to 45 minutes"},
+    ]}]}
+    tailored = TailoredResumeOutput(
+        summary="", skills_ordered=[], keywords_used=[], changes_made=[],
+        experiences=[TailoredExperience(experience_id="e1", company="Swiggy", title="Data Analyst", bullets=[
+            TailoredBullet(source_bullet_id="b1", text="Analyzed A/B tests for the checkout team"),
+            TailoredBullet(source_bullet_id="b2", text="Wrote SQL models in BigQuery that cut reporting time from "
+                           "6 hours to 45 minutes, significantly enhancing data pipeline efficiency"),
+        ])],
+    )
+    assert keep_bullets_close_to_source(tailored, snap) == 1
+    bullets = [b.text for b in tailored.experiences[0].bullets]
+    assert bullets[0] == "Analyzed A/B tests for the checkout team"  # a light rephrase stays
+    assert bullets[1] == snap["experiences"][0]["bullets"][1]["text"]  # the added claim is removed
+
+
+def test_brand_names_in_job_posts_are_not_missing_skills() -> None:
+    r = analyze_resume(STRONG, jd_text="Glance is part of InMobi and partners with YouTube. Use React, Neo4J and Looker.")
+    assert r["keywords"]["missing"] == ["Looker", "Neo4J"]
+
+
+def test_recognised_skills_without_a_job_are_real_skills() -> None:
+    r = analyze_resume(REALISTIC + "\nIPL Analytics Dashboard built at JNTU for the MIS team")
+    found = set(r["keywords"]["matched"])
+    assert {"SQL", "Python", "Power BI", "A/B testing"} <= found
+    assert not found & {"IPL", "JNTU", "MIS"}

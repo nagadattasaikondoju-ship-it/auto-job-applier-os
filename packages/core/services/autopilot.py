@@ -235,9 +235,13 @@ class AutopilotService:
 
         from packages.core.services.applications import ApplicationsService
 
+        # Tailor first, so the answer plan knows a cover letter exists
+        resume_version_id, cover_letter_id = await cls._tailor_documents(db, user_id, job.id)
         app_obj, plan = await ApplicationsService(db).create_or_get_application(
             user_id=user_id, job_id=job.id, channel="auto", campaign_id=campaign.id
         )
+        app_obj.resume_version_id = app_obj.resume_version_id or resume_version_id
+        app_obj.cover_letter_id = app_obj.cover_letter_id or cover_letter_id
         match.status = "queued"
 
         threshold = int((campaign.schedule or {}).get("hybrid_threshold") or DEFAULT_HYBRID_THRESHOLD)
@@ -285,6 +289,22 @@ class AutopilotService:
             "auto_submitted": auto_submit,
             "match_score": match.match_score,
         }
+
+    @staticmethod
+    async def _tailor_documents(db: AsyncSession, user_id: str, job_id: uuid.UUID) -> tuple[Any, Any]:
+        """Tailored resume (only if it passes the truth check) and cover letter; master resume otherwise."""
+        from packages.documents.tailor import generate_cover_letter, tailor_resume_for_job
+
+        resume_version_id = cover_letter_id = None
+        try:
+            version, _ = await tailor_resume_for_job(session=db, user_id=user_id, job_id=job_id)
+            if version.truth_check_status == "passed":
+                resume_version_id = version.id
+            cover_letter_id = (await generate_cover_letter(session=db, user_id=user_id, job_id=job_id)).id
+        except Exception as e:  # AI quota/outage: prepare the application with the master resume
+            # (the AI call fails before anything is added to the session, so nothing to roll back)
+            logger.info("Tailoring skipped for job %s: %s", job_id, e)
+        return resume_version_id, cover_letter_id
 
     @classmethod
     async def run_batch(cls, db: AsyncSession, user_id: str, max_items: int = 5) -> dict[str, Any]:

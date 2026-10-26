@@ -39,6 +39,13 @@ class ParsedProject(BaseModel):
     skills: list[str] = Field(default_factory=list)
 
 
+class ParsedCertification(BaseModel):
+    name: str
+    issuer: str = ""
+    issue_date: str = ""
+    credential_url: str | None = None
+
+
 class ParsedSkill(BaseModel):
     name: str
     normalized_name: str
@@ -62,6 +69,7 @@ class ParsedResumeOutput(BaseModel):
     experiences: list[ParsedExperience] = Field(default_factory=list)
     educations: list[ParsedEducation] = Field(default_factory=list)
     projects: list[ParsedProject] = Field(default_factory=list)
+    certifications: list[ParsedCertification] = Field(default_factory=list)
     skills: list[ParsedSkill] = Field(default_factory=list)
 
 

@@ -58,3 +58,14 @@ def test_rule_score_prefers_relevant_jobs() -> None:
     assert good["decision"] == "apply" and bad["decision"] == "skip"
     assert any("React" in r for r in good["fit_reasons"])
     assert bad["gaps"] == ["Excel isn't in your profile"]
+
+
+def test_foreign_locations() -> None:
+    from packages.core.services.match_rules import is_foreign_location
+
+    assert is_foreign_location("Remote - United States")
+    assert is_foreign_location("New York, NY")
+    assert not is_foreign_location("Bangalore, Karnataka")
+    assert not is_foreign_location("Remote - India")
+    assert not is_foreign_location("Bangalore, IN")
+    assert not is_foreign_location("Hyderabad, Telangana, India")

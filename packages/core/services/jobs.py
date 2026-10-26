@@ -84,6 +84,9 @@ async def ingest_normalized_job(
     if existing_job:
         existing_job.last_seen_at = now
         existing_job.is_active = True
+        # Pick up cleaner text from parser fixes and edits the employer made to the posting
+        if job_in.description_text and job_in.description_text != existing_job.description_text:
+            existing_job.description_text = job_in.description_text
         return existing_job, False
 
     # Lookup or create company

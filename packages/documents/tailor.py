@@ -1,6 +1,7 @@
 """Resume tailoring, cover letter generation, and truth verification service."""
 
 import logging
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,39 @@ TONE_GUIDE = {
 
 logger = logging.getLogger("applyon.documents.tailor")
 
+
+
+_STOP = {
+    "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "at", "by", "with", "from", "into", "using",
+    "used", "that", "which", "as", "its", "their", "our", "my", "across", "per", "via", "while", "was", "were",
+}
+
+
+def _content_words(text: str) -> set[str]:
+    # 5-letter prefixes so "analysis" and "analyzed" count as the same word
+    return {w[:5] for w in re.findall(r"[a-z0-9+#/]+", text.lower()) if w not in _STOP}
+
+
+def keep_bullets_close_to_source(tailored: Any, snapshot: dict[str, Any], max_new_words: int = 4) -> int:
+    """Replace tailored bullets that add more than a few new words with the original bullet text.
+
+    Rephrasing ("Responsible for X" -> "Led X") adds one or two words; invented purposes and outcomes
+    ("..., significantly enhancing pipeline efficiency") add many.
+    """
+    sources = {
+        str(b.get("id")): b.get("text", "")
+        for e in snapshot.get("experiences", [])
+        for b in e.get("bullets", [])
+        if isinstance(b, dict)
+    }
+    reverted = 0
+    for exp in tailored.experiences:
+        for b in exp.bullets:
+            src = sources.get(str(b.source_bullet_id))
+            if src and len(_content_words(b.text) - _content_words(src)) > max_new_words:
+                b.text = src
+                reverted += 1
+    return reverted
 
 async def tailor_resume_for_job(
     session: AsyncSession,
@@ -75,9 +109,12 @@ async def tailor_resume_for_job(
 
     # 3. Call Gemini to tailor resume
     system_instruction = (
-        "You are an expert ATS resume tailoring engine. Your job is to emphasize relevant experience, "
-        "reorder skills, and highlight matching achievements. You must NEVER invent companies, degrees, "
-        "titles, dates, metrics, or tools that do not appear in the candidate profile snapshot. "
+        "You are an expert ATS resume tailoring engine. Tailor by SELECTING, REORDERING and lightly "
+        "rephrasing what is already in the candidate profile: put the most relevant bullets first, order "
+        "skills by relevance, and use the job's wording where the original already says the same thing. "
+        "Never invent companies, degrees, titles, dates, metrics or tools. Never add purposes, outcomes, "
+        "impact or responsibilities that the original bullet does not state (no 'to improve X', "
+        "'enhancing Y', 'taking ownership of Z'). Keep each bullet about as long as its source. "
         "Every single bullet must link back to its source_bullet_id."
     )
 
@@ -99,7 +136,10 @@ Tailor the summary, experiences, and skills for this role without adding any unv
         prompt_version="v2_tailoring",
     )
 
-    # 4. Deterministic Truth Checker
+    # 4. Deterministic checks: bullets that drift from their source fall back to the user's wording
+    reverted = keep_bullets_close_to_source(tailored, snapshot_json)
+    if reverted:
+        tailored.changes_made.append(f"Kept your original wording for {reverted} bullet(s) where the AI added claims")
     truth_result = verify_resume_truthfulness(
         tailored_resume=tailored,
         profile_snapshot=snapshot_json,

@@ -92,11 +92,28 @@ export interface Completeness {
   [key: string]: unknown;
 }
 
+export interface ProfileProject {
+  id: string;
+  title: string;
+  description: string;
+  url: string | null;
+  skills: string[];
+}
+
+export interface ProfileCertification {
+  id: string;
+  name: string;
+  issuer: string;
+  issue_date: string;
+}
+
 export interface FullProfile {
   profile: ProfileCore;
   experiences: Experience[];
   educations: Education[];
   skills: Skill[];
+  projects: ProfileProject[];
+  certifications: ProfileCertification[];
   completeness: Completeness;
 }
 
@@ -160,6 +177,8 @@ export interface ParsedResume {
   }[];
   educations?: { institution?: string; degree?: string; field?: string; grade?: string }[];
   skills?: { name?: string; category?: string }[];
+  projects?: { title?: string; description?: string }[];
+  certifications?: { name?: string; issuer?: string; issue_date?: string }[];
   [key: string]: unknown;
 }
 

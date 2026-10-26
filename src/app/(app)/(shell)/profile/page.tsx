@@ -311,6 +311,26 @@ function ProfileView({ data }: { data: FullProfile }) {
             </div>
           </Card>
 
+          {(data.projects.length > 0 || data.certifications.length > 0) && (
+            <Card as="section" aria-labelledby="projects">
+              <CardHeader id="projects" title="Projects & certifications" description="From your resume. Upload a new resume to change them." />
+              <ul className="flex flex-col gap-3 px-5 pb-5">
+                {data.projects.map((pr) => (
+                  <li key={pr.id}>
+                    <p className="font-medium">{pr.title}</p>
+                    {pr.description && <p className="text-sm text-app-ink-2">{pr.description}</p>}
+                  </li>
+                ))}
+                {data.certifications.map((ce) => (
+                  <li key={ce.id}>
+                    <p className="font-medium">{ce.name}</p>
+                    <p className="text-sm text-app-muted">{[ce.issuer, ce.issue_date].filter(Boolean).join(" · ")}</p>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           <Card as="section" aria-labelledby="skills">
             <CardHeader id="skills" title="Skills" />
             <div className="px-5 pb-5">
