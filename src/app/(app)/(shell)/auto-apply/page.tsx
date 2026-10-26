@@ -123,7 +123,10 @@ function AutoApply({ data }: { data: AutopilotState }) {
           <Spinner label="Preparing" />
           <div>
             <p className="font-medium">Finding your best matches and preparing applications…</p>
-            <p className="text-sm text-app-muted">This usually takes a minute or two. You can leave this page.</p>
+            <p className="text-sm text-app-muted">
+              For each job we score the fit, tailor your resume and cover letter, and fill the form. Expect 2–5 minutes for the
+              first few. You can leave this page; they&apos;ll be waiting in your Review queue.
+            </p>
           </div>
         </Card>
       )}

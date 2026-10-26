@@ -47,3 +47,17 @@ async def test_salary_saved_before_resume_is_kept(client) -> None:  # type: igno
     profile = (await client.get("/v1/profile", headers=h)).json()
     flat = {**profile, **(profile.get("profile") or {})}
     assert (flat["current_ctc_lpa"], flat["expected_ctc_lpa"], flat["notice_period_days"]) == (0, 9, 15)
+
+
+def test_stale_preparing_is_released() -> None:
+    """A first batch killed by a restart must not leave 'Preparing…' on screen forever."""
+    from datetime import UTC, datetime, timedelta
+
+    from apps.api.routers.autopilot import _preparing_state
+
+    now = datetime.now(UTC)
+    assert _preparing_state({"preparing": True, "preparing_since": now.isoformat()})[0] is True
+    stale, batch = _preparing_state({"preparing": True, "preparing_since": (now - timedelta(minutes=30)).isoformat()})
+    assert stale is False and batch and "interrupted" in batch["stopped_reason"]
+    assert _preparing_state({"preparing": True})[0] is False  # flagged before timestamps existed
+    assert _preparing_state({"preparing": False, "last_batch": {"prepared": 2}}) == (False, {"prepared": 2})
