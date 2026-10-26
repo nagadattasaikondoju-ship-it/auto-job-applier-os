@@ -21,9 +21,11 @@ import {
   Skeleton,
   Textarea,
 } from "@/components/app/ui";
+import { SalaryInput } from "@/components/app/salary-input";
 import { ApiError } from "@/lib/api/client";
 import { api } from "@/lib/api/endpoints";
 import type { ExperienceBullet, FullProfile, ProfileUpdate } from "@/lib/api/types";
+import { isSalaryValid, salaryWarnings } from "@/lib/salary";
 
 function bulletText(b: ExperienceBullet | string) {
   return typeof b === "string" ? b : b.text;
@@ -117,13 +119,15 @@ function ProfileView({ data }: { data: FullProfile }) {
   const num = (v: string) => (v === "" ? null : Number(v));
   const c = data.completeness;
 
+  const salaryOk = isSalaryValid(form.current_ctc_lpa ?? null) && isSalaryValid(form.expected_ctc_lpa ?? null);
+
   return (
     <>
       <PageHeader
         title="Profile"
         description="Your master profile. Every tailored resume and form answer comes only from what's here."
         actions={
-          <Button onClick={() => save.mutate()} loading={save.isPending}>
+          <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!salaryOk}>
             Save changes
           </Button>
         }
@@ -150,7 +154,7 @@ function ProfileView({ data }: { data: FullProfile }) {
               className="grid gap-4 px-5 pb-5 sm:grid-cols-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                save.mutate();
+                if (salaryOk) save.mutate();
               }}
             >
               <Field label="Full name" htmlFor="p-name">
@@ -252,26 +256,25 @@ function ProfileView({ data }: { data: FullProfile }) {
           <Card as="section" aria-labelledby="comp">
             <CardHeader id="comp" title="Compensation & notice" description="Used to fill Indian application forms." />
             <div className="px-5 pb-5 flex flex-col gap-4">
-              <Field label="Current CTC (LPA)" htmlFor="p-ctc">
-                <Input
-                  id="p-ctc"
-                  type="number"
-                  min={0}
-                  step="0.1"
-                  value={form.current_ctc_lpa ?? ""}
-                  onChange={(e) => set("current_ctc_lpa", num(e.target.value))}
-                />
-              </Field>
-              <Field label="Expected CTC (LPA)" htmlFor="p-ectc">
-                <Input
-                  id="p-ectc"
-                  type="number"
-                  min={0}
-                  step="0.1"
-                  value={form.expected_ctc_lpa ?? ""}
-                  onChange={(e) => set("expected_ctc_lpa", num(e.target.value))}
-                />
-              </Field>
+              <SalaryInput
+                id="p-ctc"
+                label="Current CTC"
+                value={form.current_ctc_lpa ?? null}
+                onChange={(n) => set("current_ctc_lpa", n)}
+              />
+              <SalaryInput
+                id="p-ectc"
+                label="Expected CTC"
+                value={form.expected_ctc_lpa ?? null}
+                onChange={(n) => set("expected_ctc_lpa", n)}
+                crossFieldWarning={
+                  salaryWarnings({
+                    current_ctc_lpa: form.current_ctc_lpa ?? null,
+                    expected_ctc_lpa: form.expected_ctc_lpa ?? null,
+                    min_salary_lpa: 0,
+                  }).expected
+                }
+              />
               <Field label="Notice period (days)" htmlFor="p-notice">
                 <Input
                   id="p-notice"

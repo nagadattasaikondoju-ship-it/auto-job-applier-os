@@ -12,6 +12,7 @@ from apps.api.deps.db import get_db
 from packages.core.models.preferences import JobPreference
 from packages.core.models.profile import Profile
 from packages.core.services.jobs import assign_user_to_preference_buckets
+from packages.core.services.logistics import LOGISTICS_FIELDS, pending_logistics, stash_logistics
 
 router = APIRouter(prefix="/preferences", tags=["Preferences"])
 
@@ -86,9 +87,9 @@ class PreferencesPayload(BaseModel):
             setattr(self, name, getattr(self, name)[:cap])
 
 
-def _to_dict(p: JobPreference | None, profile: Profile | None) -> dict[str, Any]:
+def _to_dict(p: JobPreference | None, profile: Profile | None, pending: dict[str, Any] | None = None) -> dict[str, Any]:
     if p is None:
-        return {"exists": False, **PreferencesPayload().model_dump(), **_logistics(profile)}
+        return {"exists": False, **PreferencesPayload().model_dump(), **_logistics(profile, pending)}
     return {
         "exists": True,
         "target_roles": p.target_roles,
@@ -106,17 +107,14 @@ def _to_dict(p: JobPreference | None, profile: Profile | None) -> dict[str, Any]
         "daily_application_limit": p.daily_application_limit,
         "min_match_score": p.min_match_score,
         "apply_mode": "hybrid" if p.auto_submit_enabled else "review",
-        **_logistics(profile),
+        **_logistics(profile, pending),
     }
 
 
-def _logistics(profile: Profile | None) -> dict[str, Any]:
-    return {
-        "notice_period_days": profile.notice_period_days if profile else None,
-        "current_ctc_lpa": profile.current_ctc_lpa if profile else None,
-        "expected_ctc_lpa": profile.expected_ctc_lpa if profile else None,
-        "willing_to_relocate": profile.willing_to_relocate if profile else None,
-    }
+def _logistics(profile: Profile | None, pending: dict[str, Any] | None = None) -> dict[str, Any]:
+    if profile is None:
+        return {field: (pending or {}).get(field) for field in LOGISTICS_FIELDS}
+    return {field: getattr(profile, field) for field in LOGISTICS_FIELDS}
 
 
 @router.get("")
@@ -126,7 +124,7 @@ async def get_preferences(
 ) -> dict[str, Any]:
     pref = (await db.execute(select(JobPreference).where(JobPreference.user_id == user.user_id))).scalar_one_or_none()
     profile = (await db.execute(select(Profile).where(Profile.user_id == user.user_id))).scalar_one_or_none()
-    return _to_dict(pref, profile)
+    return _to_dict(pref, profile, None if profile else await pending_logistics(db, user.user_id))
 
 
 @router.put("")
@@ -159,11 +157,14 @@ async def save_preferences(
     pref.auto_submit_enabled = body.apply_mode == "hybrid"
 
     profile = (await db.execute(select(Profile).where(Profile.user_id == user.user_id))).scalar_one_or_none()
+    logistics = {field: getattr(body, field) for field in LOGISTICS_FIELDS}
     if profile is not None:
-        for field in ("notice_period_days", "current_ctc_lpa", "expected_ctc_lpa", "willing_to_relocate"):
-            value = getattr(body, field)
+        for field, value in logistics.items():
             if value is not None:
                 setattr(profile, field, value)
+    else:
+        # No resume yet: keep the answers until the profile is created
+        await stash_logistics(db, user.user_id, logistics)
 
     await assign_user_to_preference_buckets(
         session=db,
@@ -174,4 +175,4 @@ async def save_preferences(
         allows_remote="remote" in pref.remote_mode or any(c.lower() == "remote" for c in pref.locations),
     )
     await db.commit()
-    return _to_dict(pref, profile)
+    return _to_dict(pref, profile, None if profile else await pending_logistics(db, user.user_id))

@@ -23,3 +23,27 @@ async def test_validation_error_names_the_field(client) -> None:  # type: ignore
     resp = await client.put("/v1/preferences", json={"daily_application_limit": 500}, headers={"X-Dev-User-Id": "pref-val-user"})
     assert resp.status_code == 422
     assert resp.json()["error"]["message"] == "Please check: daily application limit"
+
+
+async def test_salary_saved_before_resume_is_kept(client) -> None:  # type: ignore[no-untyped-def]
+    """'I don't have a resume yet': CTC and notice must survive until the profile exists."""
+    import uuid
+
+    h = {"X-Dev-User-Id": f"no-resume-{uuid.uuid4().hex[:8]}"}
+    body = {
+        "target_roles": ["Data Analyst"],
+        "locations": ["Bengaluru"],
+        "current_ctc_lpa": 0,
+        "expected_ctc_lpa": 9,
+        "notice_period_days": 15,
+    }
+    saved = (await client.put("/v1/preferences", json=body, headers=h)).json()
+    assert (saved["current_ctc_lpa"], saved["expected_ctc_lpa"], saved["notice_period_days"]) == (0, 9, 15)
+    again = (await client.get("/v1/preferences", headers=h)).json()
+    assert (again["current_ctc_lpa"], again["expected_ctc_lpa"], again["notice_period_days"]) == (0, 9, 15)
+
+    # The profile created later picks the answers up
+    assert (await client.put("/v1/profile", json={"full_name": "Asha Rao"}, headers=h)).status_code == 200
+    profile = (await client.get("/v1/profile", headers=h)).json()
+    flat = {**profile, **(profile.get("profile") or {})}
+    assert (flat["current_ctc_lpa"], flat["expected_ctc_lpa"], flat["notice_period_days"]) == (0, 9, 15)

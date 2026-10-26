@@ -29,6 +29,7 @@ from packages.core.services.ats import (
     extract_text,
     heuristic_parse,
 )
+from packages.core.services.logistics import apply_pending_logistics
 from packages.core.services.match_rules import estimate_experience_years
 from packages.core.services.profile import create_profile_version
 
@@ -261,6 +262,7 @@ async def confirm_resume_profile(
             links=data.get("links") or {},
         )
         db.add(profile)
+        await apply_pending_logistics(db, profile)
     else:
         profile.full_name = data.get("full_name", profile.full_name)
         profile.phone = data.get("phone", profile.phone)

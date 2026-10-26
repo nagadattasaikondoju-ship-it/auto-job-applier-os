@@ -16,6 +16,7 @@ from packages.core.models.profile import (
     Project,
     Skill,
 )
+from packages.core.services.logistics import apply_pending_logistics
 from packages.core.services.profile import (
     compute_profile_completeness,
 )
@@ -174,6 +175,7 @@ async def update_my_profile(
             full_name=payload.full_name or "Applicant",
         )
         db.add(profile)
+        await apply_pending_logistics(db, profile)
 
     # Update fields provided in payload
     for k, v in payload.model_dump(exclude_unset=True).items():

@@ -2,8 +2,10 @@
 
 import type { ApplyMode, Preferences, Seniority, WorkMode } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
+import { isSalaryValid, salaryWarnings } from "@/lib/salary";
+import { SalaryInput } from "./salary-input";
 import { ChipGroup, TagInput } from "./tag-input";
-import { Checkbox, Field, Input } from "./ui";
+import { Checkbox, Field } from "./ui";
 
 export const ROLE_SUGGESTIONS = [
   "Software Engineer",
@@ -76,7 +78,6 @@ export interface PrefStep {
   render: (v: PrefValue, set: Set) => React.ReactNode;
 }
 
-const num = (s: string) => (s === "" ? null : Math.max(0, Number(s)));
 
 /** The 7 questions, in order. Used one-per-screen in onboarding and all together on the Preferences page. */
 export const PREFERENCE_STEPS: PrefStep[] = [
@@ -124,21 +125,51 @@ export const PREFERENCE_STEPS: PrefStep[] = [
   {
     id: "salary",
     title: "What salary are you looking for?",
-    description: "Indian application forms ask for current and expected CTC. We fill these in for you.",
-    valid: () => true,
-    render: (v, set) => (
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="Current CTC (LPA)" htmlFor="pref-ctc" hint="0 if you're a fresher">
-          <Input id="pref-ctc" type="number" min={0} step="0.5" value={v.current_ctc_lpa ?? ""} onChange={(e) => set("current_ctc_lpa", num(e.target.value))} />
-        </Field>
-        <Field label="Expected CTC (LPA)" htmlFor="pref-ectc">
-          <Input id="pref-ectc" type="number" min={0} step="0.5" value={v.expected_ctc_lpa ?? ""} onChange={(e) => set("expected_ctc_lpa", num(e.target.value))} />
-        </Field>
-        <Field label="Don't show jobs below (LPA)" htmlFor="pref-floor" hint="Leave 0 to see everything">
-          <Input id="pref-floor" type="number" min={0} step="0.5" value={v.min_salary_lpa || ""} onChange={(e) => set("min_salary_lpa", num(e.target.value) ?? 0)} />
-        </Field>
-      </div>
-    ),
+    description:
+      "Indian application forms ask for current and expected CTC (yearly, before tax). Type it the way you know it: 6.5 LPA, 6,50,000 a year or 54,000 a month.",
+    valid: (v) => isSalaryValid(v.current_ctc_lpa) && isSalaryValid(v.expected_ctc_lpa) && Number.isFinite(v.min_salary_lpa),
+    render: (v, set) => {
+      const cross = salaryWarnings(v);
+      const fresher = v.current_ctc_lpa === 0;
+      return (
+        <div className="flex flex-col gap-5">
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <SalaryInput
+                id="pref-ctc"
+                label="Current CTC"
+                value={v.current_ctc_lpa}
+                onChange={(n) => set("current_ctc_lpa", n)}
+                disabled={fresher}
+              />
+              <Checkbox
+                checked={fresher}
+                onChange={(x) => set("current_ctc_lpa", x ? 0 : null)}
+                label="I don't have a current salary (fresher or between jobs)"
+              />
+            </div>
+            <SalaryInput
+              id="pref-ectc"
+              label="Expected CTC"
+              hint="Optional. If you leave it blank, we'll ask you whenever an application form needs it."
+              value={v.expected_ctc_lpa}
+              onChange={(n) => set("expected_ctc_lpa", n)}
+              crossFieldWarning={cross.expected}
+            />
+          </div>
+          <div className="sm:max-w-[calc(50%-0.625rem)]">
+            <SalaryInput
+              id="pref-floor"
+              label="Hide jobs that pay less than"
+              hint="Optional. Jobs without a listed salary are always shown."
+              value={v.min_salary_lpa || null}
+              onChange={(n) => set("min_salary_lpa", n ?? 0)}
+              crossFieldWarning={cross.floor}
+            />
+          </div>
+        </div>
+      );
+    },
   },
   {
     id: "notice",
