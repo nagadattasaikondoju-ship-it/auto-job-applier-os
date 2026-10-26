@@ -3,7 +3,7 @@
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,11 +31,11 @@ EXPERIENCE_BANDS: dict[str, tuple[int, int]] = {
 
 
 class PreferencesPayload(BaseModel):
-    target_roles: list[str] = Field(default_factory=list, max_length=10)
-    role_keywords: list[str] = Field(default_factory=list, max_length=30)
-    industries: list[str] = Field(default_factory=list, max_length=20)
+    target_roles: list[str] = Field(default_factory=list)  # trimmed to 10
+    role_keywords: list[str] = Field(default_factory=list)  # trimmed to 30
+    industries: list[str] = Field(default_factory=list)  # trimmed to 20
     seniority: Seniority = "fresher"
-    locations: list[str] = Field(default_factory=list, max_length=15)
+    locations: list[str] = Field(default_factory=list)  # trimmed to 15
     remote_mode: list[RemoteMode] = Field(default_factory=lambda: list(ALL_REMOTE_MODES))
     min_salary_lpa: float = Field(default=0, ge=0, le=500)
     company_size: list[str] = Field(default_factory=list)
@@ -51,6 +51,39 @@ class PreferencesPayload(BaseModel):
     current_ctc_lpa: float | None = Field(default=None, ge=0, le=500)
     expected_ctc_lpa: float | None = Field(default=None, ge=0, le=500)
     willing_to_relocate: bool | None = None
+
+    @field_validator("min_salary_lpa", "current_ctc_lpa", "expected_ctc_lpa", mode="before")
+    @classmethod
+    def _rupees_to_lakhs(cls, v: Any) -> Any:
+        """People often type CTC in rupees (600000) instead of lakhs (6): convert instead of rejecting."""
+        try:
+            amount = float(v)
+        except (TypeError, ValueError):
+            return v
+        return round(amount / 100_000, 2) if amount >= 1_000 else v
+
+    @field_validator(
+        "target_roles", "role_keywords", "industries", "locations", "excluded_companies", "excluded_keywords",
+        mode="before",
+    )
+    @classmethod
+    def _dedupe_and_cap(cls, v: Any) -> Any:
+        """Drop blanks and duplicates, and keep the first N items rather than failing the whole save."""
+        if not isinstance(v, list):
+            return v
+        seen: set[str] = set()
+        out: list[Any] = []
+        for item in v:
+            key = str(item).strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                out.append(str(item).strip())
+        return out
+
+    def model_post_init(self, __context: Any) -> None:
+        caps = {"target_roles": 10, "role_keywords": 30, "industries": 20, "locations": 15}
+        for name, cap in caps.items():
+            setattr(self, name, getattr(self, name)[:cap])
 
 
 def _to_dict(p: JobPreference | None, profile: Profile | None) -> dict[str, Any]:

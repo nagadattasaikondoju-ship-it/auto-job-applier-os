@@ -85,6 +85,18 @@ async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse
     )
 
 
+def _validation_message(exc: RequestValidationError) -> str:
+    """Name the fields that failed ("Please check: expected ctc lpa") so the user knows what to fix."""
+    fields = []
+    for err in exc.errors():
+        loc = [str(p) for p in err.get("loc", ()) if p not in ("body", "query", "path") and not str(p).isdigit()]
+        if loc:
+            name = loc[-1].replace("_", " ")
+            if name not in fields:
+                fields.append(name)
+    return f"Please check: {', '.join(fields)}" if fields else "Invalid request parameters"
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
     return JSONResponse(
@@ -92,7 +104,7 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
         content={
             "error": {
                 "code": "VALIDATION_ERROR",
-                "message": "Invalid request parameters",
+                "message": _validation_message(exc),
                 "details": exc.errors(),
             }
         },
