@@ -9,21 +9,25 @@
 
 1. Sign in at [render.com](https://render.com) with GitHub.
 2. **New → Blueprint** → choose `auto-job-applier-os` and the branch to deploy.
-3. Render shows what it will create: `applyon-db` (Postgres), `applyon-redis`, `applyon-api`, `applyon-worker`.
+3. Render shows what it will create: `applyon-db` (Postgres), `applyon-redis` and `applyon-api`, all on free plans.
    Fill in the secret values it asks for:
    - `GEMINI_API_KEY`: required for AI parsing, scoring and tailoring.
    - `ADZUNA_APP_ID` / `ADZUNA_APP_KEY`: optional, but strongly recommended for a much bigger job pool.
    - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`: leave empty until Firebase login is set up.
 4. **Apply.** The first build takes about 10 minutes (it installs Chromium for auto-submitting).
-   On every start the API runs database migrations and loads the company list. When the worker
-   starts, it runs a first job search right away.
+   On every start the API runs database migrations, loads the company list and starts the
+   background worker inside the same container, which runs a first job search right away.
 5. Copy the API URL, e.g. `https://applyon-api.onrender.com`. Check `…/health/ready` shows
    `"database":"connected","redis":"connected"`.
 
-Costs: the API, Redis and Postgres use free plans. Free Postgres expires after 30 days, so upgrade it
-to keep data. The worker needs the Starter plan (~$7/month). Without it there's no hourly job
-search, no scheduled matching and no auto-submitting. A free API also sleeps after 15 idle minutes,
-so the first request after that takes ~1 minute.
+Costs: everything runs on Render's free plans; no card is needed. Limits:
+- Free Postgres expires after 30 days: upgrade it (or export your data) before then.
+- The free API sleeps after 15 idle minutes. While asleep, scheduled job searches, matching and
+  auto-apply pause; the next visit wakes it (~1 minute).
+- The worker shares 512 MB with the API (tested: ~460 MB peak while Chromium submits a form).
+
+For always-on background work, uncomment `applyon-worker` in `render.yaml` (Starter, ~$7/month)
+and remove the `celery …&` line from the API's start command.
 
 ## 2. Point the website at the API
 

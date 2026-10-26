@@ -26,9 +26,15 @@ services:
     dockerfilePath: ./infra/Dockerfile
     dockerContext: .
     healthCheckPath: /health/ready
+    # Free plan: the background worker (job search, matching, auto-apply, browser submissions)
+    # runs inside this same container. Free services sleep after 15 idle minutes, so scheduled
+    # work pauses until the next visit. For always-on work, uncomment applyon-worker below
+    # (Starter plan, ~$7/month) and remove the celery line here.
     dockerCommand: >-
       sh -c "alembic upgrade head &&
       python -m packages.core.seed.load_companies &&
+      (celery -A apps.workers.celery_app.celery_app worker --beat --pool=solo --loglevel=info
+      --queues=job_ingestion,embeddings,ai_matching,document_generation,form_schema,browser_automation,autopilot,notifications,maintenance,priority &) &&
       uvicorn apps.api.main:app --host 0.0.0.0 --port $PORT"
     envVars: &backendEnv
       - key: APP_ENV
@@ -64,15 +70,15 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
 
-  # Background work: job discovery (hourly), matching (30 min), auto-apply (15 min) and the
-  # Playwright browser that submits approved applications. Workers aren't on Render's free plan.
-  - type: worker
-    name: applyon-worker
-    runtime: docker
-    plan: starter
-    dockerfilePath: ./infra/Dockerfile
-    dockerContext: .
-    dockerCommand: >-
-      celery -A apps.workers.celery_app.celery_app worker --beat --loglevel=info --concurrency=2
-      --queues=job_ingestion,embeddings,ai_matching,document_generation,form_schema,browser_automation,autopilot,notifications,maintenance,priority
-    envVars: *backendEnv
+# # Background work: job discovery (hourly), matching (30 min), auto-apply (15 min) and the
+# # Playwright browser that submits approved applications. Workers aren't on Render's free plan.
+# - type: worker
+#   name: applyon-worker
+#   runtime: docker
+#   plan: starter
+#   dockerfilePath: ./infra/Dockerfile
+#   dockerContext: .
+#   dockerCommand: >-
+#     celery -A apps.workers.celery_app.celery_app worker --beat --loglevel=info --concurrency=2
+#     --queues=job_ingestion,embeddings,ai_matching,document_generation,form_schema,browser_automation,autopilot,notifications,maintenance,priority
+#   envVars: *backendEnv
