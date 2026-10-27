@@ -33,7 +33,7 @@ export default function Home() {
           {/* Section 5, 6 & 7: How It Works, Features Bento Grid, Safety Promise */}
           <HowItWorksBento />
 
-          {/* About The Founders */}
+          {/* About Applyon */}
           <AboutFoundersSection />
 
           {/* Section 8: Comparison Table */}
