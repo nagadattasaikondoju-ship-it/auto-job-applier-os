@@ -17,13 +17,13 @@ export function DriftbarFooter() {
       <div className="absolute inset-0 z-0 pointer-events-none" aria-hidden="true">
         <video
           className="w-full h-full object-cover object-[50%_100%] translate-y-[9%]"
-          src="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/4d01c727-d9c5-47c8-a778-35a451ffd39f.mp4"
-          poster="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20261014_121838_c97d0940-f430-4304-8573-4f47ee44f447.png"
+          src="/media/footer.mp4"
+          poster="/media/footer-poster.webp"
           autoPlay
           muted
           loop
           playsInline
-          preload="auto"
+          preload="metadata"
         />
         <div
           className="absolute inset-0"

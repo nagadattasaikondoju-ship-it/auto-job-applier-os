@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -32,7 +32,28 @@ class StartRequest(BaseModel):
     hybrid_threshold: int = Field(default=DEFAULT_HYBRID_THRESHOLD, ge=80, le=100)
 
 
+# The first batch runs in the API process; a restart (deploy, out of memory, free-tier sleep) kills it
+# without clearing "preparing". After this long, stop showing the spinner and offer a retry instead.
+PREPARING_STALE_AFTER = timedelta(minutes=20)
+
+
+def _preparing_state(stats: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
+    last_batch = stats.get("last_batch")
+    if not stats.get("preparing"):
+        return False, last_batch
+    since_raw = stats.get("preparing_since")
+    since = datetime.fromisoformat(since_raw) if since_raw else None
+    if since and datetime.now(UTC) - since < PREPARING_STALE_AFTER:
+        return True, last_batch
+    return False, {
+        "prepared": 0,
+        "stopped_reason": "Preparing was interrupted (the server restarted). Press \"Prepare applications now\" to try again.",
+        "at": since_raw or datetime.now(UTC).isoformat(),
+    }
+
+
 def _campaign_dict(c: Campaign) -> dict[str, Any]:
+    preparing, last_batch = _preparing_state(c.stats or {})
     return {
         "id": str(c.id),
         "mode": c.mode,
@@ -42,8 +63,8 @@ def _campaign_dict(c: Campaign) -> dict[str, Any]:
         "hybrid_threshold": (c.schedule or {}).get("hybrid_threshold", DEFAULT_HYBRID_THRESHOLD),
         "started_at": c.started_at.isoformat() if c.started_at else None,
         "paused_reason": (c.stats or {}).get("paused_reason"),
-        "preparing": bool((c.stats or {}).get("preparing")),
-        "last_batch": (c.stats or {}).get("last_batch"),
+        "preparing": preparing,
+        "last_batch": last_batch,
     }
 
 
@@ -147,7 +168,7 @@ async def start_autopilot(
         campaign.stats = {k: v for k, v in (campaign.stats or {}).items() if k != "paused_reason"}
     pref.auto_submit_enabled = body.mode == "hybrid"
     pref.daily_application_limit = daily_limit
-    campaign.stats = {**(campaign.stats or {}), "preparing": True}
+    campaign.stats = {**(campaign.stats or {}), "preparing": True, "preparing_since": datetime.now(UTC).isoformat()}
     await db.commit()
 
     # Matching and tailoring can take a minute (AI calls), so the first batch runs after we reply;

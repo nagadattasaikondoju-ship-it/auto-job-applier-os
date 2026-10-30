@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AtsKeywords } from "@/components/app/ats-report";
-import { Badge, Button, Card, CardHeader, Checkbox, EmptyState, ErrorState, ScoreRing, Select, Skeleton, Spinner, Tabs } from "@/components/app/ui";
+import { Badge, Button, Card, CardHeader, Checkbox, EmptyState, ErrorState, ScoreRing, Select, SERVER_WAKING_HINT, Skeleton, Spinner, Tabs } from "@/components/app/ui";
 import { api } from "@/lib/api/endpoints";
 import type { CoverLetterDoc, Experience, FlaggedClaim, ResumeVersion } from "@/lib/api/types";
 
@@ -68,7 +68,7 @@ export default function TailorPage() {
       </div>
 
       {existing.isPending ? (
-        <Spinner label="Loading your documents" />
+        <Spinner label="Loading your documents" slowHint={SERVER_WAKING_HINT} />
       ) : existing.isError ? (
         <ErrorState error={existing.error} onRetry={() => existing.refetch()} />
       ) : !resume ? (

@@ -15,8 +15,12 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
             staleTime: 30_000,
             refetchOnWindowFocus: false,
             // Don't retry client errors (401/403/404/422): they won't fix themselves.
-            retry: (count, err) =>
-              !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
+            // A timeout already waited 90s: show "Try again" rather than waiting another 90s.
+            retry: (count, err) => {
+              if (err instanceof ApiError && err.status >= 400 && err.status < 500) return false;
+              if (err instanceof ApiError && err.code === "TIMEOUT") return count < 1;
+              return count < 2;
+            },
           },
         },
       })

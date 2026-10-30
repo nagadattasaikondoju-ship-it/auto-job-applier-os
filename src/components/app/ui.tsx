@@ -2,7 +2,7 @@
 
 import { AlertCircle, Inbox, Loader2, X } from "lucide-react";
 import Link from "next/link";
-import { forwardRef, useEffect, useId, useRef } from "react";
+import { forwardRef, useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Tone } from "@/lib/format";
 
@@ -235,11 +235,33 @@ export function Field({
   );
 }
 
-export function Spinner({ label = "Loading" }: { label?: string }) {
+/** Shown on page loads that wait on the API, once they take longer than a few seconds. */
+export const SERVER_WAKING_HINT =
+  "Waking up the server. After a quiet spell the first load can take up to a minute; it's quick after that.";
+
+export function Spinner({
+  label = "Loading",
+  slowHint,
+  slowAfterMs = 6000,
+}: {
+  label?: string;
+  /** Extra line shown once loading takes longer than slowAfterMs. */
+  slowHint?: string;
+  slowAfterMs?: number;
+}) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!slowHint) return;
+    const t = setTimeout(() => setSlow(true), slowAfterMs);
+    return () => clearTimeout(t);
+  }, [slowHint, slowAfterMs]);
   return (
-    <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm text-app-muted">
-      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-      {label}…
+    <div role="status" className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-app-muted">
+      <span className="flex items-center gap-2">
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+        {label}…
+      </span>
+      {slow && slowHint && <span className="max-w-sm text-center text-xs text-app-subtle">{slowHint}</span>}
     </div>
   );
 }

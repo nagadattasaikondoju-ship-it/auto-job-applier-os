@@ -6,30 +6,27 @@ import { ArrowUpRight } from "lucide-react";
 export function AboutFoundersSection() {
   const statCards = [
     {
-      value: "7+ years",
-      text: "Launchex has served the market, guiding ventures and their journeys",
-      image:
-        "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260514_154203_6c6f94dc-a07e-4ba5-8688-106f01ccd2c8.png&w=1280&q=85",
+      value: "100%",
+      text: "of resume changes are checked against your real experience. We never invent skills, titles or numbers.",
+      image: "/media/about-1.webp",
       offset: false,
       clipPath:
         "polygon(64px 0, calc(100% - 14px) 0, calc(100% - 4px) 4px, 100% 14px, 100% calc(100% - 14px), calc(100% - 4px) calc(100% - 4px), calc(100% - 14px) 100%, 14px 100%, 4px calc(100% - 4px), 0 calc(100% - 14px), 0 64px)",
       textPlacement: "left-6 right-6 bottom-6",
     },
     {
-      value: "15000+",
-      text: "innovation ventures moved through the Launchex pipeline",
-      image:
-        "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260514_154151_45c62c60-3bcc-4f21-8f9d-03722ebb5df8.png&w=1280&q=85",
+      value: "< 1 min",
+      text: "to get your free ATS score and a list of fixes after you upload your resume.",
+      image: "/media/about-2.webp",
       offset: true,
       clipPath:
         "polygon(0 14px, 4px 4px, 14px 0, calc(100% - 64px) 0, 100% 64px, 100% calc(100% - 14px), calc(100% - 4px) calc(100% - 4px), calc(100% - 14px) 100%, 64px 100%, 0 calc(100% - 64px))",
       textPlacement: "left-6 bottom-20",
     },
     {
-      value: "120+",
-      text: "accelerator sessions delivered by Launchex across Eastern Europe",
-      image:
-        "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260514_152238_24ec8db4-d728-4739-bb30-e985533e9637.png&w=1280&q=85",
+      value: "0",
+      text: "applications sent without your approval in Review mode. You see every one first.",
+      image: "/media/about-3.webp",
       offset: false,
       clipPath:
         "polygon(0 14px, 4px 4px, 14px 0, calc(100% - 64px) 0, 100% 64px, 100% calc(100% - 64px), calc(100% - 64px) 100%, 14px 100%, 4px calc(100% - 4px), 0 calc(100% - 14px))",
@@ -51,7 +48,7 @@ export function AboutFoundersSection() {
             <h2 className="font-firs text-[36px] sm:text-[48px] lg:text-[54px] font-semibold uppercase tracking-tight leading-[0.95] text-[#154359]">
               About
               <br />
-              the founders
+              Applyon
             </h2>
           </div>
 
@@ -59,21 +56,21 @@ export function AboutFoundersSection() {
           <div className="flex flex-col max-w-xl text-[#154359]">
             <div className="text-[17px] sm:text-[18px] leading-[1.5]">
               <p>
-                Launchex.Hub is a platform that is part of a portfolio of companies Launchex, for sourcing and showcasing groundbreaking innovations.
+                Applyon is an AI job copilot built for India. It reads your resume, finds roles that fit on LinkedIn, Indeed
+                and company career pages, and tailors your resume and answers for each one.
               </p>
               <p className="mt-4">
-                Launchex.Hub's mission is to offer every local-language innovator the chance to reshape our world with their pioneering creation.
+                Our rule is simple: your applications stay honest. Every change is checked against what you&apos;ve really done,
+                and nothing is sent until you say so.
               </p>
             </div>
 
             {/* External link */}
             <a
-              href="https://base.launchex.vc/"
-              target="_blank"
-              rel="noreferrer"
+              href="/onboarding"
               className="group inline-flex items-center gap-4 mt-6 text-[14px] font-medium text-[#154359]"
             >
-              <span>Launchex.Hub website</span>
+              <span>Get your free ATS score</span>
               <div
                 className="flex items-center justify-center w-8 h-8 border border-[#154359] transition-transform group-hover:-translate-y-0.5"
                 style={{

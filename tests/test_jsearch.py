@@ -79,3 +79,45 @@ def test_extract_items_v1_and_v2() -> None:
     assert extract_items({"data": [ITEM]}) == [ITEM]
     assert extract_items({"data": {"jobs": [ITEM]}}) == [ITEM]
     assert extract_items({"status": "ERROR"}) == []
+
+
+def test_realtime_jobs_connectors(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from packages.core.config import settings
+    from packages.jobs_sources.jsearch import realtime_jobs_connector
+
+    monkeypatch.setattr(settings, "realtime_jobs_api_key", "")
+    monkeypatch.setattr(settings, "jsearch_api_key", "k1")
+    google = realtime_jobs_connector("google_jobs", "Data Analyst", "Bengaluru")
+    assert google.url.endswith("/realtime-jobs-data/google-jobs/search")
+    assert google.params["query"] == "Data Analyst jobs in Bengaluru" and google.params["country"] == "in"
+    assert google.api_key == "k1"  # falls back to the JSearch key
+
+    monkeypatch.setattr(settings, "realtime_jobs_api_key", "k2")
+    indeed = realtime_jobs_connector("indeed", "Data Analyst", "India")
+    assert indeed.url.endswith("/indeed/search") and "location" not in indeed.params
+    assert indeed.api_key == "k2"
+    linkedin = realtime_jobs_connector("linkedin", "Data Analyst", "Pune")
+    assert linkedin.params["location"] == "Pune, India"
+
+    job = linkedin.normalize(linkedin.to_raw(ITEM))
+    assert job.source == "linkedin" and job.ats_type == "lever"
+
+
+def test_non_inr_salary_ignored() -> None:
+    conn = JSearchConnector(query="x")
+    job = conn.normalize(conn.to_raw({**ITEM, "job_salary_currency": "USD", "job_description": "SQL"}))
+    assert job.salary_min_lpa is None
+
+
+def test_search_plan(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from packages.core.config import settings
+    from packages.core.services.discovery import _search_plan
+
+    monkeypatch.setattr(settings, "jsearch_api_key", "")
+    monkeypatch.setattr(settings, "realtime_jobs_api_key", "")
+    assert _search_plan("Data Analyst", "Pune") == []
+    monkeypatch.setattr(settings, "realtime_jobs_api_key", "k")
+    monkeypatch.setattr(settings, "realtime_jobs_sources", ["indeed", "bogus"])
+    assert [label for label, _ in _search_plan("Data Analyst", "Pune")] == ["indeed:Data Analyst:Pune"]
+    monkeypatch.setattr(settings, "jsearch_api_key", "j")
+    assert [c.source_name for _, c in _search_plan("Data Analyst", "Pune")] == ["jsearch", "indeed"]

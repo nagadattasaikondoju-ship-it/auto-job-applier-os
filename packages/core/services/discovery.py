@@ -1,4 +1,4 @@
-"""Job discovery orchestration: crawl due company boards, Adzuna and JSearch, then re-run matching.
+"""Job discovery orchestration: crawl due company boards, Adzuna and OpenWebNinja (JSearch, Google Jobs, Indeed, LinkedIn), then re-run matching.
 
 Used by the Celery beat schedule (all users) and by "Find jobs now" (one user).
 """
@@ -19,14 +19,18 @@ from packages.core.services.matching import run_matching_funnel_for_user
 from packages.jobs_sources.adzuna import AdzunaConnector
 from packages.jobs_sources.ashby import AshbyBoardConnector
 from packages.jobs_sources.greenhouse import GreenhouseBoardConnector
-from packages.jobs_sources.jsearch import JSearchConnector
+from packages.jobs_sources.jsearch import (
+    REALTIME_SOURCES,
+    JSearchConnector,
+    realtime_jobs_connector,
+)
 from packages.jobs_sources.lever import LeverPostingsConnector
 
 logger = logging.getLogger("applyon.discovery")
 
 _BOARD_CONNECTORS = {"greenhouse", "lever", "ashby"}
 
-# A JSearch query (role + city) is repeated at most this often; each call costs a credit
+# An OpenWebNinja search (source + role + city) is repeated at most this often; each costs a credit
 JSEARCH_REFRESH = timedelta(hours=12)
 
 
@@ -121,27 +125,44 @@ async def crawl_adzuna_for_preferences(user_ids: list[str] | None = None, max_pa
     return {"searches": min(len(pairs), max_pairs), "new_jobs": new_jobs}
 
 
+def _search_plan(role: str, city: str) -> list[tuple[str, Any]]:
+    """(cache label, connector) for every OpenWebNinja search enabled for this role and city."""
+    plan: list[tuple[str, Any]] = []
+    if settings.jsearch_api_key:
+        query = f"{role} jobs in {city}"
+        plan.append((f"jsearch:{query}", JSearchConnector(query=query)))
+    if settings.realtime_jobs_api_key or settings.jsearch_api_key:
+        for source in settings.realtime_jobs_sources:
+            if source in REALTIME_SOURCES:
+                plan.append((f"{source}:{role}:{city}", realtime_jobs_connector(source, role, city)))
+    return plan
+
+
 async def crawl_jsearch_for_preferences(
     user_ids: list[str] | None = None, max_queries: int = 10
 ) -> dict[str, int]:
-    """Search JSearch for each (role, city) pair; each query runs at most once per JSEARCH_REFRESH (credits)."""
-    if not settings.jsearch_api_key:
+    """Search JSearch / Real-Time Jobs Data (Google Jobs, Indeed, LinkedIn) for each (role, city) pair.
+
+    Each search costs a credit, so the same search runs at most once per JSEARCH_REFRESH and
+    max_queries caps the total per call.
+    """
+    if not (settings.jsearch_api_key or settings.realtime_jobs_api_key):
         return {"jsearch_searches": 0, "jsearch_new_jobs": 0}
     redis = await get_async_redis()
     searched = new_jobs = 0
     for role, city in await _role_city_pairs(user_ids):
-        if searched >= max_queries:
-            break
-        query = f"{role} jobs in {city}" if city.lower() != "india" else f"{role} jobs in India"
-        cache_key = f"jsearch:q:{query.lower()}"
-        # SET NX doubles as the lock and the "searched recently" marker
-        if not await redis.set(cache_key, "1", ex=int(JSEARCH_REFRESH.total_seconds()), nx=True):
-            continue
-        searched += 1
-        try:
-            new_jobs += await _ingest(JSearchConnector(query=query))
-        except Exception as e:
-            logger.warning("JSearch failed for %r: %s", query, e)
+        for label, connector in _search_plan(role, city):
+            if searched >= max_queries:
+                return {"jsearch_searches": searched, "jsearch_new_jobs": new_jobs}
+            # SET NX doubles as the lock and the "searched recently" marker
+            cache_key = f"owm:q:{label.lower()}"
+            if not await redis.set(cache_key, "1", ex=int(JSEARCH_REFRESH.total_seconds()), nx=True):
+                continue
+            searched += 1
+            try:
+                new_jobs += await _ingest(connector)
+            except Exception as e:
+                logger.warning("Job search %s failed: %s", label, e)
     return {"jsearch_searches": searched, "jsearch_new_jobs": new_jobs}
 
 
@@ -164,7 +185,7 @@ async def match_users(user_ids: list[str] | None = None) -> dict[str, int]:
 async def discover_for_user(user_id: str) -> dict[str, Any]:
     """'Find jobs now': search this user's roles/cities, crawl due boards, then match."""
     adzuna = await crawl_adzuna_for_preferences([user_id], max_pairs=6)
-    jsearch = await crawl_jsearch_for_preferences([user_id], max_queries=3)
+    jsearch = await crawl_jsearch_for_preferences([user_id], max_queries=4)
     boards = await crawl_due_companies(limit=10)
     matched = await match_users([user_id])
     return {**adzuna, **jsearch, **boards, **matched}

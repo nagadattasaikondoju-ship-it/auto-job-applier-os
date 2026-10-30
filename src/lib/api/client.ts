@@ -64,20 +64,43 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// A sleeping free-tier server takes up to about a minute to start; reads give up after this so the page
+// can offer a retry instead of spinning forever. Writes (uploads, AI work) are not cut off.
+const READ_TIMEOUT_MS = 90_000;
+
+let wakeSent = false;
+
+/** Fire-and-forget ping so a sleeping API starts booting while the visitor is still on the page. */
+export function wakeApi() {
+  if (wakeSent || typeof window === "undefined") return;
+  wakeSent = true;
+  fetch(`${API_BASE_URL}/health/live`, { mode: "no-cors", cache: "no-store", keepalive: true }).catch(() => {});
+}
+
 export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json", ...(await authHeaders()) };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  const method = opts.method ?? "GET";
+
+  const timeout = method === "GET" && "timeout" in AbortSignal ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined;
+  // AbortSignal.any is newer (Safari 17.4+); without it the caller's signal wins
+  const signal =
+    opts.signal && timeout && "any" in AbortSignal ? AbortSignal.any([opts.signal, timeout]) : (opts.signal ?? timeout);
 
   let res: Response;
   try {
     res = await fetch(buildUrl(path, opts.query), {
-      method: opts.method ?? "GET",
+      method,
       headers,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: opts.signal,
+      signal,
     });
-  } catch {
-    throw new ApiError(0, "NETWORK_ERROR", "Can't reach the Applyon API. Is the backend running?");
+  } catch (e) {
+    if (timeout?.aborted && !opts.signal?.aborted) {
+      throw new ApiError(0, "TIMEOUT", "The server is taking too long to respond. It may still be starting up, so try again in a moment.");
+    }
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new ApiError(0, "NETWORK_ERROR", "Can't reach the Applyon API. Check your connection and try again.");
   }
 
   if (res.status === 204) return undefined as T;

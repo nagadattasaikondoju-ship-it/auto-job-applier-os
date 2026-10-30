@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { WakeApi } from "@/components/app/wake-api";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { landingContent } from "@/content/landing";
 
@@ -100,6 +101,7 @@ export default function RootLayout({
         className="antialiased selection:bg-indigo-500/20 selection:text-indigo-600 font-body"
       >
         <JsonLd />
+        <WakeApi />
         {children}
       </body>
     </html>
