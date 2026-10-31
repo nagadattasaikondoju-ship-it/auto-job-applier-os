@@ -11,8 +11,8 @@
 [Neon](https://neon.tech)'s free plan doesn't expire and supports `pgvector`, which Applyon needs for matching.
 
 1. Sign up at neon.tech (GitHub or Google login) and create a project in **AWS Asia Pacific (Singapore)**.
-2. On the project dashboard, click **Connect**, turn **Connection pooling off**, and copy the connection
-   string, e.g. `postgresql://user:password@ep-xxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
+2. On the project dashboard, click **Connect** and copy the connection string (pooled or not: `setup.sh`
+   uses the pooled one for the app and derives the direct one for migrations), e.g. `postgresql://user:password@ep-xxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
    Use it exactly as shown: Applyon converts `sslmode`/`channel_binding` for its database driver.
 
 The backend creates the tables and the `vector` extension by itself on first start.

@@ -75,6 +75,10 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
   fi
 
+  # Migrations need a direct connection: Neon's pooled host ("ep-x-pooler.…") runs in transaction
+  # mode, which breaks the prepared statements they use. The direct host is the same name without -pooler.
+  DIRECT_DATABASE_URL="${DATABASE_URL/-pooler./.}"
+
   umask 077
   # Single quotes: Docker Compose then uses the values literally (no $ interpolation)
   cat > "$ENV_FILE" <<ENV
@@ -85,7 +89,7 @@ FRONTEND_URL='$FRONTEND_URL'
 CORS_ORIGINS='["$FRONTEND_URL","http://localhost:3000"]'
 ALLOW_DEV_LOGIN='false'
 DATABASE_URL='$DATABASE_URL'
-DIRECT_DATABASE_URL='$DATABASE_URL'
+DIRECT_DATABASE_URL='$DIRECT_DATABASE_URL'
 GEMINI_API_KEY='$GEMINI_API_KEY'
 JSEARCH_API_KEY='$JSEARCH_API_KEY'
 FIREBASE_PROJECT_ID='$FIREBASE_PROJECT_ID'
