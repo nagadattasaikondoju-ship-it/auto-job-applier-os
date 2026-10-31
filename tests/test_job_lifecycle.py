@@ -116,3 +116,32 @@ async def test_board_ingest_closes_removed_posting(monkeypatch) -> None:  # type
     async with async_session_maker() as db:
         rows = (await db.execute(select(Job.title, Job.is_active).where(Job.company_id == company.id))).all()
     assert sorted(rows) == [("Data Analyst 1", True), ("Data Analyst 2", True), ("Data Analyst 3", False)]
+
+
+async def test_board_ingest_keeps_only_postings_open_to_india(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    company = await _company()
+    connector = GreenhouseBoardConnector(board_token="lc", company_name=company.name)
+    places = ["Bengaluru, India", "Remote - India", "Remote", "San Francisco, California", "Remote - USA", "Bangkok"]
+
+    async def fetch(*_: Any, **__: Any) -> list[RawJob]:
+        return [
+            RawJob(source="greenhouse", external_id=f"in-{i}-{company.id}", company_name=company.name,
+                   title=f"Engineer {i}", location_raw=loc,
+                   application_url=f"https://boards.greenhouse.io/lc/jobs/9{i}{company.id.hex[:6]}", description_raw="<p>Go</p>")
+            for i, loc in enumerate(places)
+        ]
+
+    monkeypatch.setattr(connector, "fetch", fetch)
+    await discovery._ingest(connector, board_company=company)
+    async with async_session_maker() as db:
+        stored = sorted((await db.execute(select(Job.location_raw).where(Job.company_id == company.id))).scalars())
+    assert stored == ["Bengaluru, India", "Remote", "Remote - India"]
+
+
+def test_india_relevance_on_real_board_locations() -> None:
+    from packages.core.services.match_rules import is_india_relevant
+
+    for loc in ["Bengaluru, India", "Noida, Uttar Pradesh", "IN-Pune", "Gurugram", "India (Remote)", "APAC", "Remote"]:
+        assert is_india_relevant(loc, "onsite" if "Remote" not in loc and loc != "APAC" else "remote"), loc
+    for loc in ["United States", "Remote - USA", "London, United Kingdom", "Tokyo, Japan", "Bangkok", "Singapore", "N/A"]:
+        assert not is_india_relevant(loc, "remote" if "Remote" in loc else "onsite"), loc

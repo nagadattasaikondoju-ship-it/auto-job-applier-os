@@ -17,6 +17,7 @@ from packages.core.models.preferences import JobPreference
 from packages.core.redis import get_async_redis
 from packages.core.services.job_lifecycle import sweep_board
 from packages.core.services.jobs import ingest_normalized_job
+from packages.core.services.match_rules import is_india_relevant
 from packages.core.services.matching import run_matching_funnel_for_user
 from packages.jobs_sources.adzuna import AdzunaConnector
 from packages.jobs_sources.ashby import AshbyBoardConnector
@@ -46,14 +47,24 @@ def _connector_for(company: Company) -> Any:
 
 
 async def _ingest(connector: Any, board_company: Company | None = None) -> int:
-    """Fetch and store a connector's jobs. For a company board, also close postings it no longer lists."""
+    """Fetch and store a connector's jobs. For a company board, also close postings it no longer lists.
+
+    Company boards are global (Databricks lists ~900 jobs worldwide), so only postings that can be
+    applied to from India are kept: located in India, or remote and not tied to another country.
+    Postings dropped this way count as "not seen", so ones stored earlier get closed by the sweep.
+    """
     raw_jobs = await connector.fetch()
     new = 0
     seen: set[uuid.UUID] = set()
     stored_under: set[uuid.UUID] = set()
+    skipped = 0
     async with async_session_maker() as session:
         for raw in raw_jobs:
-            job, is_new = await ingest_normalized_job(session=session, job_in=connector.normalize(raw))
+            job_in = connector.normalize(raw)
+            if board_company is not None and not is_india_relevant(job_in.location_raw, job_in.remote_mode):
+                skipped += 1
+                continue
+            job, is_new = await ingest_normalized_job(session=session, job_in=job_in)
             seen.add(job.id)
             stored_under.add(job.company_id)
             new += int(is_new)
@@ -62,6 +73,8 @@ async def _ingest(connector: Any, board_company: Company | None = None) -> int:
             # Sweep the company the jobs were actually stored under (matched by name at ingest)
             for company_id in stored_under or {board_company.id}:
                 await sweep_board(session, company_id, connector.source_name, seen)
+            if skipped:
+                logger.info("%s: kept %d India postings, skipped %d elsewhere", board_company.name, len(seen), skipped)
         await session.commit()
     return new
 
