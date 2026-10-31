@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.ai.client import gemini_client
@@ -178,8 +178,13 @@ async def get_jobs_feed(
     cursor: datetime | None = None,
     limit: int = 20,
     min_match_score: int | None = None,
+    matched_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Retrieve keyset-paginated jobs feed for user with match scores."""
+    """Retrieve keyset-paginated jobs feed for user with match scores.
+
+    matched_only keeps jobs that passed this user's filters (role, city, experience) and
+    weren't dismissed, so "Matched for you" doesn't list every job ingested for anyone.
+    """
     stmt = (
         select(Job, JobMatch, Company.name.label("company_name"))
         .join(Company, Job.company_id == Company.id)
@@ -193,8 +198,13 @@ async def get_jobs_feed(
         )
     )
 
+    # Jobs without a posting date sort by when we first saw them (NULLs would otherwise come first)
+    sort_at = func.coalesce(Job.posted_at, Job.first_seen_at)
     if cursor:
-        stmt = stmt.where(Job.posted_at < cursor)
+        stmt = stmt.where(sort_at < cursor)
+
+    if matched_only:
+        stmt = stmt.where(JobMatch.filter_passed.is_(True), JobMatch.status != "dismissed")
 
     if min_match_score is not None:
         stmt = stmt.where(
@@ -204,7 +214,7 @@ async def get_jobs_feed(
             )
         )
 
-    stmt = stmt.order_by(desc(Job.posted_at), desc(Job.id)).limit(limit)
+    stmt = stmt.order_by(desc(sort_at), desc(Job.id)).limit(limit)
     res = await session.execute(stmt)
 
     feed = []
@@ -227,6 +237,7 @@ async def get_jobs_feed(
                 "ats_type": job.ats_type,
                 "apply_mode": apply_mode(job.ats_type, job.application_url),
                 "posted_at": job.posted_at.isoformat() if job.posted_at else None,
+                "sort_at": (job.posted_at or job.first_seen_at).isoformat(),
                 "match": (
                     {
                         "score": match.match_score,

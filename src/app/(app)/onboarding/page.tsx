@@ -11,10 +11,31 @@ import { EMPTY_PREFERENCES, PREFERENCE_STEPS, type PrefValue } from "@/component
 import { Badge, Button, Card, Checkbox, ErrorState, ProgressBar, SERVER_WAKING_HINT, Spinner, Textarea } from "@/components/app/ui";
 import { ApiError } from "@/lib/api/client";
 import { api } from "@/lib/api/endpoints";
+import { useAuth } from "@/lib/auth";
 import type { AtsReport, ConsentPurpose, FullProfile, ParsedResume, Seniority, UploadResumeResult } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 type Step = "upload" | "review" | "ats" | "preferences" | "launch";
+
+// The parsed resume is only saved to the profile on "Looks right". Keep it for this tab until then,
+// so a refresh on the review step doesn't send the user back to upload it again.
+const pendingKey = (uid: string) => `applyon:pending-upload:${uid}`;
+function readPending(uid: string): UploadResumeResult | null {
+  try {
+    const raw = window.sessionStorage.getItem(pendingKey(uid));
+    return raw ? (JSON.parse(raw) as UploadResumeResult) : null;
+  } catch {
+    return null;
+  }
+}
+function writePending(uid: string, value: UploadResumeResult | null) {
+  try {
+    if (value) window.sessionStorage.setItem(pendingKey(uid), JSON.stringify(value));
+    else window.sessionStorage.removeItem(pendingKey(uid));
+  } catch {
+    // Storage unavailable (private mode): the user just uploads again after a refresh
+  }
+}
 
 const STEPS: { id: Step; label: string }[] = [
   { id: "upload", label: "Resume" },
@@ -26,15 +47,26 @@ const STEPS: { id: Step; label: string }[] = [
 
 export default function OnboardingPage() {
   const [chosen, setStep] = useState<Step | null>(null);
-  const [upload, setUpload] = useState<UploadResumeResult | null>(null);
+  const [uploaded, setUploadState] = useState<UploadResumeResult | null>(null);
+  const { user } = useAuth();
+  const uid = user?.uid ?? null;
+  const setUpload = (r: UploadResumeResult | null) => {
+    setUploadState(r);
+    if (uid) writePending(uid, r);
+  };
 
   // Resume where the user left off: no profile → upload; no preferences → preferences; else launch.
   const profile = useQuery({ queryKey: ["profile"], queryFn: api.profile.get, retry: false });
   const prefs = useQuery({ queryKey: ["preferences"], queryFn: api.preferences.get, retry: false });
   // Only "no profile yet" (404) means upload; any other failure is shown with a retry, never a wrong step
   const noProfile = profile.error instanceof ApiError && profile.error.status === 404;
+  // An upload that was read but not confirmed before a refresh (only while there's still no profile)
+  const restored = !uploaded && !chosen && uid && noProfile ? readPending(uid) : null;
+  const upload = uploaded ?? restored;
   const inferred: Step | null = noProfile
-    ? "upload"
+    ? restored
+      ? "review"
+      : "upload"
     : profile.isSuccess && prefs.isSuccess
       ? prefs.data.exists
         ? "launch"
@@ -95,7 +127,17 @@ export default function OnboardingPage() {
           />
         )}
         {step === "review" && upload && (
-          <ReviewStep upload={upload} onBack={() => setStep("upload")} onConfirmed={() => setStep("ats")} />
+          <ReviewStep
+            upload={upload}
+            onBack={() => {
+              setUpload(null);
+              setStep("upload");
+            }}
+            onConfirmed={() => {
+              if (uid) writePending(uid, null);
+              setStep("ats");
+            }}
+          />
         )}
         {step === "review" && !upload && <Spinner />}
         {step === "ats" && (

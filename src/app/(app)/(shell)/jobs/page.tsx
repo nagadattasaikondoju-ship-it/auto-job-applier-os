@@ -63,7 +63,7 @@ export default function JobsPage() {
   const feed = useInfiniteQuery({
     queryKey: ["jobs", "feed", minScore],
     queryFn: ({ pageParam }) =>
-      api.jobs.feed({ cursor: pageParam, limit: 20, min_match_score: minScore ? Number(minScore) : null }),
+      api.jobs.feed({ cursor: pageParam, limit: 20, min_match_score: minScore ? Number(minScore) : null, matched_only: true }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.items.length === 20 ? last.next_cursor : null),
   });
@@ -154,13 +154,13 @@ export default function JobsPage() {
       ) : jobs.length === 0 ? (
         <Card>
           <EmptyState
-            title={tab === "saved" ? "No saved jobs" : search ? "No jobs match that filter" : "No jobs yet"}
+            title={tab === "saved" ? "No saved jobs" : search ? "No jobs match that filter" : "No matches yet"}
             description={
               search
                 ? "Try a different search, or lower the minimum fit score."
                 : tab === "saved"
                   ? "Use the bookmark on any job to save it for later."
-                  : "Click “Find jobs now” to search job boards and career pages for your target roles, or import a job you found."
+                  : "Only jobs that fit your roles, cities and experience show here. Click “Find jobs now” to search job boards and career pages; new matches appear within a few minutes. You can also import a job you found."
             }
             action={
               !search && tab === "all" && (

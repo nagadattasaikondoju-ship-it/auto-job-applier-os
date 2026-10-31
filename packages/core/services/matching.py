@@ -17,7 +17,6 @@ from packages.core.models.profile import (
     Experience,
     Profile,
     ProfileEmbedding,
-    ProfileVersion,
     Skill,
 )
 from packages.core.redis import get_async_redis
@@ -29,7 +28,7 @@ from packages.core.services.match_rules import (
     rule_based_score,
     title_allowed,
 )
-from packages.core.services.profile import create_profile_snapshot_for_user
+from packages.core.services.profile import current_profile_version
 
 logger = logging.getLogger("applyon.matching")
 
@@ -57,18 +56,7 @@ async def run_matching_funnel_for_user(
         logger.info("Matching aborted for user %s: missing profile or preferences", user_id)
         return []
 
-    # Get active profile version
-    ver_stmt = (
-        select(ProfileVersion)
-        .where(ProfileVersion.user_id == user_id)
-        .order_by(ProfileVersion.version_no.desc())
-        .limit(1)
-    )
-    ver_res = await session.execute(ver_stmt)
-    profile_version = ver_res.scalar_one_or_none()
-    if profile_version is None:
-        # Profiles built without a resume upload have no snapshot yet; job_matches requires one
-        profile_version = await create_profile_snapshot_for_user(session, user_id)
+    profile_version = await current_profile_version(session, user_id)
     profile_version_id = profile_version.id
 
     # Get user profile embedding

@@ -15,6 +15,7 @@ from packages.core.models.jobs import Company, Job
 from packages.core.models.matching import JobMatch
 from packages.core.services.apply_mode import apply_mode
 from packages.core.services.jobs import get_jobs_feed, ingest_normalized_job
+from packages.core.services.profile import current_profile_version
 from packages.jobs_sources.manual import ManualUrlImporter
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -35,6 +36,7 @@ async def list_jobs_feed(
     cursor: datetime | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     min_match_score: int | None = Query(default=None, ge=0, le=100),
+    matched_only: bool = Query(default=False),
     current_user: AuthenticatedUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -45,12 +47,11 @@ async def list_jobs_feed(
         cursor=cursor,
         limit=limit,
         min_match_score=min_match_score,
+        matched_only=matched_only,
     )
     next_cursor = None
     if jobs:
-        last_job_posted = jobs[-1].get("posted_at")
-        if last_job_posted:
-            next_cursor = last_job_posted
+        next_cursor = jobs[-1].get("sort_at")
 
     return {
         "items": jobs,
@@ -178,9 +179,11 @@ async def submit_job_feedback(
 
     if not match:
         # Create match entry to record dismissal
+        version = await current_profile_version(session, current_user.user_id)
         match = JobMatch(
             user_id=current_user.user_id,
             job_id=job_id,
+            profile_version_id=version.id,
             filter_passed=True,
             match_score=50,
             decision="skip",
@@ -211,9 +214,11 @@ async def toggle_saved_job(
         )
     ).scalar_one_or_none()
     if not match:
+        version = await current_profile_version(session, current_user.user_id)
         match = JobMatch(
             user_id=current_user.user_id,
             job_id=job_id,
+            profile_version_id=version.id,
             filter_passed=True,
             match_score=0,
             decision="maybe",
