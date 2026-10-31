@@ -119,6 +119,7 @@ async def get_job_detail(
         "application_url": job.application_url,
         "ats_type": job.ats_type,
         "apply_mode": apply_mode(job.ats_type, job.application_url),
+        "is_active": job.is_active,
         "posted_at": job.posted_at.isoformat() if job.posted_at else None,
         "match": (
             {

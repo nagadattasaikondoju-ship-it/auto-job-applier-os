@@ -4,6 +4,7 @@ Used by the Celery beat schedule (all users) and by "Find jobs now" (one user).
 """
 
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -14,6 +15,7 @@ from packages.core.database import async_session_maker
 from packages.core.models.jobs import Company
 from packages.core.models.preferences import JobPreference
 from packages.core.redis import get_async_redis
+from packages.core.services.job_lifecycle import sweep_board
 from packages.core.services.jobs import ingest_normalized_job
 from packages.core.services.matching import run_matching_funnel_for_user
 from packages.jobs_sources.adzuna import AdzunaConnector
@@ -43,13 +45,23 @@ def _connector_for(company: Company) -> Any:
     return AshbyBoardConnector(board_token=token, company_name=company.name)
 
 
-async def _ingest(connector: Any) -> int:
+async def _ingest(connector: Any, board_company: Company | None = None) -> int:
+    """Fetch and store a connector's jobs. For a company board, also close postings it no longer lists."""
     raw_jobs = await connector.fetch()
     new = 0
+    seen: set[uuid.UUID] = set()
+    stored_under: set[uuid.UUID] = set()
     async with async_session_maker() as session:
         for raw in raw_jobs:
-            _, is_new = await ingest_normalized_job(session=session, job_in=connector.normalize(raw))
+            job, is_new = await ingest_normalized_job(session=session, job_in=connector.normalize(raw))
+            seen.add(job.id)
+            stored_under.add(job.company_id)
             new += int(is_new)
+        if board_company is not None:
+            await session.flush()
+            # Sweep the company the jobs were actually stored under (matched by name at ingest)
+            for company_id in stored_under or {board_company.id}:
+                await sweep_board(session, company_id, connector.source_name, seen)
         await session.commit()
     return new
 
@@ -82,7 +94,7 @@ async def crawl_due_companies(limit: int = 25) -> dict[str, int]:
             ):
                 continue
             try:
-                new_jobs += await _ingest(_connector_for(company))
+                new_jobs += await _ingest(_connector_for(company), board_company=company)
                 company.failure_count = 0
             except Exception as e:  # one bad board must not stop the rest
                 logger.warning("Crawl failed for %s: %s", company.name, e)

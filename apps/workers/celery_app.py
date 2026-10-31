@@ -56,6 +56,7 @@ celery_app.conf.beat_schedule = {
     "discover-jobs-hourly": {"task": "jobs.discover_all", "schedule": 60 * 60},
     "match-users-every-30-min": {"task": "jobs.match_all_users", "schedule": 30 * 60},
     "autopilot-every-15-min": {"task": "autopilot.tick", "schedule": 15 * 60},
+    "expire-stale-jobs-daily": {"task": "jobs.expire_stale", "schedule": 24 * 60 * 60},
 }
 
 

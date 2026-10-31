@@ -146,3 +146,18 @@ def match_all_users() -> dict[str, Any]:
     from packages.core.services.discovery import match_users
 
     return run_async(match_users())
+
+
+@celery_app.task(name="jobs.expire_stale", queue="maintenance")
+def expire_stale_jobs_task() -> dict[str, Any]:
+    """Daily: close postings not seen again for a while, and pull back applications waiting on them."""
+    from packages.core.database import async_session_maker
+    from packages.core.services.job_lifecycle import expire_stale_jobs
+
+    async def _run() -> dict[str, Any]:
+        async with async_session_maker() as session:
+            result = await expire_stale_jobs(session)
+            await session.commit()
+            return result
+
+    return run_async(_run())

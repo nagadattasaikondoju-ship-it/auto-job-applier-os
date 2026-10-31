@@ -272,6 +272,8 @@ export interface JobFeed {
 }
 
 export interface JobDetail extends Omit<JobFeedItem, "experience_range"> {
+  /** false once the employer closed or removed the posting */
+  is_active?: boolean;
   description_html: string | null;
   description_text: string | null;
   experience_min: number | null;
