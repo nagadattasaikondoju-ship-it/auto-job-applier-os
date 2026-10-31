@@ -28,7 +28,7 @@ async def list_matches(
         select(JobMatch, Job, Company.name.label("company_name"))
         .join(Job, JobMatch.job_id == Job.id)
         .join(Company, Job.company_id == Company.id)
-        .where(JobMatch.user_id == current_user.user_id)
+        .where(JobMatch.user_id == current_user.user_id, Job.is_active.is_(True))  # hide closed postings
     )
 
     if decision:

@@ -19,6 +19,19 @@ _CONFIRMED = re.compile(
 _FORM_ERRORS = re.compile(r"(this field is required|is required|can't be blank|please (fill|complete|enter))", re.I)
 
 
+# Analytics and chat widgets cost CPU on a small server and are never needed to fill a form
+_TRACKER_HOSTS = re.compile(
+    r"google-analytics\.com|googletagmanager\.com|doubleclick\.net|hotjar\.|segment\.(io|com)|"
+    r"facebook\.net|intercom\.io|intercomcdn\.com|fullstory\.com|clarity\.ms|linkedin\.com/px|"
+    r"heap(analytics)?\.(io|com)|mixpanel\.com|sentry\.io|newrelic\.com|nr-data\.net",
+    re.I,
+)
+
+
+def is_navigation_timeout(error: Exception) -> bool:
+    return type(error).__name__ == "TimeoutError" and "goto" in str(error).lower()
+
+
 def submission_confirmed(html: str, form_url: str, current_url: str) -> bool:
     """True only when the page clearly shows the application went through."""
     text = re.sub(r"<[^>]+>", " ", html)
@@ -30,9 +43,11 @@ def submission_confirmed(html: str, form_url: str, current_url: str) -> bool:
 class BrowserAutomationExecutor:
     """Manages browser lifecycle and executes ATS application form submissions."""
 
-    def __init__(self, headless: bool = True, timeout_ms: int = 25000):
+    def __init__(self, headless: bool = True, timeout_ms: int = 25000, navigation_timeout_ms: int = 90000):
         self.headless = headless
-        self.timeout_ms = timeout_ms
+        self.timeout_ms = timeout_ms  # each form action
+        # Opening the page: Chromium on a small shared CPU can need far longer than a click does
+        self.navigation_timeout_ms = navigation_timeout_ms
 
     async def execute_application(
         self,
@@ -94,20 +109,33 @@ class BrowserAutomationExecutor:
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
                     viewport={"width": 1280, "height": 800},
                 )
-                page = await context.new_page()
-                page.set_default_timeout(self.timeout_ms)
-
-                # Fast mode: block unnecessary media/font downloads
+                # Fast mode: skip images, media, fonts and trackers; forms don't need them
                 async def _route_filter(route: Any) -> None:
-                    if route.request.resource_type in ["image", "media", "font"]:
+                    request = route.request
+                    if request.resource_type in ["image", "media", "font"] or _TRACKER_HOSTS.search(request.url):
                         await route.abort()
                     else:
                         await route.continue_()
 
-                await page.route("**/*", _route_filter)
+                async def _open() -> Any:
+                    tab = await context.new_page()
+                    tab.set_default_timeout(self.timeout_ms)
+                    tab.set_default_navigation_timeout(self.navigation_timeout_ms)
+                    await tab.route("**/*", _route_filter)
+                    await tab.goto(application_url, wait_until="domcontentloaded")
+                    return tab
 
-                # Navigate
-                await page.goto(application_url, wait_until="domcontentloaded")
+                # Navigate, retrying once in a fresh tab (the timed-out load would abort a retry in the
+                # same tab): a slow first load is usually a cold browser on a busy CPU, not the site
+                try:
+                    page = await _open()
+                except Exception as e:
+                    if not is_navigation_timeout(e):
+                        raise
+                    logger.warning("Slow first load of %s, retrying once", application_url)
+                    for stale in list(context.pages):
+                        await stale.close()
+                    page = await _open()
                 content = await page.content()
                 current_url = page.url
 
@@ -195,9 +223,15 @@ class BrowserAutomationExecutor:
             )
         except Exception as e:
             logger.error(f"Browser automation error: {e}", exc_info=True)
+            message = str(e)
+            if is_navigation_timeout(e):
+                message = (
+                    "The application page didn't load in time (tried twice). Nothing was submitted. "
+                    "Press Retry, or open the job link and apply yourself."
+                )
             return AutomationResult(
                 success=False,
                 status="failed",
-                error_message=str(e),
+                error_message=message,
                 total_fields=len(fields),
             )

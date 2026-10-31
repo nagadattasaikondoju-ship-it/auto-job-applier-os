@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.ai.client import gemini_client
 from packages.core.models.jobs import Company, Job, JobEmbedding, PreferenceBucket
 from packages.core.models.matching import JobMatch
+from packages.core.services.apply_mode import apply_mode
 from packages.jobs_sources.base import JobIn
 
 
@@ -224,6 +225,7 @@ async def get_jobs_feed(
                 "required_skills": job.required_skills,
                 "application_url": job.application_url,
                 "ats_type": job.ats_type,
+                "apply_mode": apply_mode(job.ats_type, job.application_url),
                 "posted_at": job.posted_at.isoformat() if job.posted_at else None,
                 "match": (
                     {

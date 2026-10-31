@@ -13,6 +13,7 @@ from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
 from packages.core.models.jobs import Company, Job
 from packages.core.models.matching import JobMatch
+from packages.core.services.apply_mode import apply_mode
 from packages.core.services.jobs import get_jobs_feed, ingest_normalized_job
 from packages.jobs_sources.manual import ManualUrlImporter
 
@@ -117,6 +118,8 @@ async def get_job_detail(
         "required_skills": job.required_skills,
         "application_url": job.application_url,
         "ats_type": job.ats_type,
+        "apply_mode": apply_mode(job.ats_type, job.application_url),
+        "is_active": job.is_active,
         "posted_at": job.posted_at.isoformat() if job.posted_at else None,
         "match": (
             {

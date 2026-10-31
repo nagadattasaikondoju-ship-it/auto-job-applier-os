@@ -185,3 +185,26 @@ def rule_based_score(
         "resume_focus": matched[:3],
         "risk_flags": [],
     }
+
+
+# Indian cities and states seen on global ATS boards ("Bengaluru, India", "Noida, Uttar Pradesh", "Pune")
+_INDIA_LOCATION = re.compile(
+    r"\b(india|bharat|bengaluru|bangalore|mumbai|bombay|navi mumbai|thane|pune|hyderabad|secunderabad|chennai|"
+    r"delhi|new delhi|ncr|gurugram|gurgaon|noida|faridabad|ghaziabad|kolkata|ahmedabad|gandhinagar|jaipur|"
+    r"kochi|cochin|trivandrum|thiruvananthapuram|coimbatore|indore|chandigarh|mohali|lucknow|bhubaneswar|"
+    r"nagpur|vadodara|surat|mysore|mysuru|mangalore|visakhapatnam|vizag|karnataka|maharashtra|telangana|"
+    r"tamil nadu|uttar pradesh|haryana|kerala|gujarat|west bengal|punjab|rajasthan|andhra pradesh|odisha|goa)\b",
+    re.I,
+)
+# Remote postings open to anyone, or to the region India is in
+_OPEN_REMOTE = re.compile(r"^\s*(remote|anywhere|worldwide|global|apac|asia|asia pacific|emea\s*/\s*apac)?\s*(\(remote\)|- remote)?\s*$", re.I)
+
+
+def is_india_relevant(location: str, remote_mode: str) -> bool:
+    """Whether a board posting can be applied to from India: located in India, or remote and not tied to a country."""
+    loc = location or ""
+    if _INDIA_LOCATION.search(loc):
+        return True
+    if remote_mode == "remote" or "remote" in loc.lower():
+        return bool(_OPEN_REMOTE.match(loc.replace("Remote -", "").replace("Remote,", "").strip() or "remote"))
+    return False

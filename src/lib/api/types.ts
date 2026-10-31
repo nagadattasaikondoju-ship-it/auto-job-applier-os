@@ -260,6 +260,7 @@ export interface JobFeedItem {
   required_skills: string[] | null;
   application_url: string;
   ats_type: string | null;
+  apply_mode?: SubmitMode;
   posted_at: string | null;
   match: MatchSummary | null;
 }
@@ -271,6 +272,8 @@ export interface JobFeed {
 }
 
 export interface JobDetail extends Omit<JobFeedItem, "experience_range"> {
+  /** false once the employer closed or removed the posting */
+  is_active?: boolean;
   description_html: string | null;
   description_text: string | null;
   experience_min: number | null;
@@ -399,6 +402,9 @@ export interface ApplicationEvent {
   created_at: string;
 }
 
+/** "auto": Applyon submits it after your approval. "assisted": you submit it yourself with prepared answers. */
+export type SubmitMode = "auto" | "assisted";
+
 export interface ApplicationDetail {
   id: string;
   status: ApplicationStatus;
@@ -409,6 +415,9 @@ export interface ApplicationDetail {
   failure_reason: string | null;
   follow_up_at: string | null;
   resume_version_id: string | null;
+  cover_letter_id?: string | null;
+  apply_mode?: SubmitMode;
+  apply_ats?: string;
   job: {
     id: string;
     title: string;

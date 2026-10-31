@@ -20,6 +20,7 @@ from packages.core.services.answer_resolver import (
     FieldDefinition,
     ResolvedPlan,
 )
+from packages.core.services.apply_mode import apply_ats, apply_mode
 from packages.core.services.form_schema import FormSchemaService
 
 VALID_STATUSES = {
@@ -235,6 +236,9 @@ class ApplicationsService:
             "failure_reason": app_obj.failure_reason,
             "follow_up_at": app_obj.follow_up_at.isoformat() if app_obj.follow_up_at else None,
             "resume_version_id": str(app_obj.resume_version_id) if app_obj.resume_version_id else None,
+            "cover_letter_id": str(app_obj.cover_letter_id) if app_obj.cover_letter_id else None,
+            "apply_ats": apply_ats(getattr(job_obj, "ats_type", None), app_obj.application_url),
+            "apply_mode": apply_mode(getattr(job_obj, "ats_type", None), app_obj.application_url),
             "job": {
                 "id": str(job_obj.id),
                 "title": job_obj.title,

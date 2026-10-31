@@ -68,6 +68,9 @@ class Settings(BaseSettings):
         default_factory=lambda: ["gemini-3.5-flash-lite", "gemini-3-flash-preview"]
     )
 
+    # Matching: Gemini scores at most this many jobs per user per day; the rest use rule-based scores
+    ai_match_daily_budget: int = 24
+
     # Job Ingestion
     adzuna_app_id: str = ""
     adzuna_app_key: str = ""

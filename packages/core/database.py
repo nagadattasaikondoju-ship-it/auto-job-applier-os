@@ -27,6 +27,9 @@ if use_pooler:
     connect_args["prepared_statement_cache_size"] = 0
     engine_kwargs["poolclass"] = NullPool
     engine_kwargs["connect_args"] = connect_args
+elif settings.app_env == "test":
+    # Each async test runs on its own event loop; pooled connections can't cross loops
+    engine_kwargs["poolclass"] = NullPool
 else:
     engine_kwargs["pool_size"] = settings.db_pool_size
     engine_kwargs["max_overflow"] = settings.db_max_overflow

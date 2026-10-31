@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
 from packages.core.services.applications import ApplicationsService
+from packages.core.services.apply_mode import assisted_reason
 
 router = APIRouter(prefix="/review-queue", tags=["Review Queue"])
 
@@ -60,8 +61,30 @@ async def approve_application(
     user: AuthenticatedUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Candidate approves the application for submission."""
+    """Candidate approves the application for submission.
+
+    Sites we can't submit to (CAPTCHA, login walls, unsupported ATS) skip the browser run and go
+    straight to the assisted hand-off: the user finishes them with the prepared answers.
+    """
     svc = ApplicationsService(db)
+    detail = await svc.get_application_detail(user_id=user.user_id, application_id=application_id)
+    if detail["apply_mode"] == "assisted":
+        reason = assisted_reason(detail["apply_ats"], detail["application_url"])
+        app_obj = await svc.update_status(
+            user_id=user.user_id,
+            application_id=application_id,
+            new_status="needs_user_action",
+            actor="user",
+            notes="Approved for assisted apply",
+            failure_reason=reason,
+        )
+        return {
+            "id": str(app_obj.id),
+            "status": app_obj.status,
+            "approved": True,
+            "submission_queued": False,
+            "apply_mode": "assisted",
+        }
     app_obj = await svc.update_status(
         user_id=user.user_id,
         application_id=application_id,
@@ -74,7 +97,13 @@ async def approve_application(
     from apps.workers.dispatch import enqueue_browser_submission
 
     queued = enqueue_browser_submission(str(app_obj.id))
-    return {"id": str(app_obj.id), "status": app_obj.status, "approved": True, "submission_queued": queued}
+    return {
+        "id": str(app_obj.id),
+        "status": app_obj.status,
+        "approved": True,
+        "submission_queued": queued,
+        "apply_mode": "auto",
+    }
 
 
 @router.post("/applications/{application_id}/reject")
