@@ -1,7 +1,7 @@
 #!/bin/sh
-# Container start-up for hosted deploys (Render): migrate, load companies, start the background
-# worker (unless RUN_WORKER_IN_API=false) and run the API. Uses absolute paths so it doesn't
-# depend on how the host runs the command.
+# Container start-up for hosted deploys: migrate, load companies, start the background worker
+# (unless RUN_WORKER_IN_API=false, as in infra/gcp where it has its own container) and run the API.
+# Uses absolute paths so it doesn't depend on how the host runs the command.
 set -e
 cd /app
 PY=/app/.venv/bin/python
