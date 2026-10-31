@@ -69,14 +69,15 @@ def _serve(delays: list[float]) -> tuple[ThreadingHTTPServer, str]:
 
 
 def _run(url: str) -> object:
-    executor = BrowserAutomationExecutor(timeout_ms=2000, navigation_timeout_ms=1500)
+    # Wide margins (3s limit vs a 6s slow page) so a busy CI machine can't turn the fast retry into a timeout
+    executor = BrowserAutomationExecutor(timeout_ms=5000, navigation_timeout_ms=3000)
     return asyncio.run(
         executor.execute_application("t1", url, "generic", [{"label": "Name", "value": "Asha"}], dry_run=True)
     )
 
 
 def test_slow_first_load_is_retried() -> None:
-    server, url = _serve([3.0, 0.0])
+    server, url = _serve([6.0, 0.0])
     try:
         result = _run(url)
     finally:
@@ -85,7 +86,7 @@ def test_slow_first_load_is_retried() -> None:
 
 
 def test_page_that_never_loads_gets_a_clear_message() -> None:
-    server, url = _serve([3.0])
+    server, url = _serve([6.0])
     try:
         result = _run(url)
     finally:

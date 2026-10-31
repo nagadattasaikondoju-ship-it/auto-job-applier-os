@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import ColumnElement, and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,11 +29,13 @@ from packages.core.services.match_rules import (
     rule_based_score,
     title_allowed,
 )
+from packages.core.services.profile import create_profile_snapshot_for_user
 
 logger = logging.getLogger("applyon.matching")
 
 # Gemini scores only the best few candidates per run; the rest use rule-based scores.
 AI_SCORED_PER_RUN = 8
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 async def run_matching_funnel_for_user(
@@ -63,7 +66,10 @@ async def run_matching_funnel_for_user(
     )
     ver_res = await session.execute(ver_stmt)
     profile_version = ver_res.scalar_one_or_none()
-    profile_version_id = profile_version.id if profile_version else None
+    if profile_version is None:
+        # Profiles built without a resume upload have no snapshot yet; job_matches requires one
+        profile_version = await create_profile_snapshot_for_user(session, user_id)
+    profile_version_id = profile_version.id
 
     # Get user profile embedding
     emb_stmt = select(ProfileEmbedding).where(
@@ -170,13 +176,20 @@ async def run_matching_funnel_for_user(
     # 4. Stage 3: AI scoring for the very top (saves quota); rules score the rest
     redis = await get_async_redis()
     results: list[JobMatch] = []
-    ai_budget = 0 if gemini_client.is_mock else min(AI_SCORED_PER_RUN, len(top_candidates))
+    # Matching runs every 30 minutes: cap Gemini calls per user per day (IST) to keep cost predictable
+    budget_key = f"aimatch:{user_id}:{datetime.now(IST).date().isoformat()}"
+    used_today = int(await redis.get(budget_key) or 0)
+    ai_budget = (
+        0
+        if gemini_client.is_mock
+        else max(0, min(AI_SCORED_PER_RUN, len(top_candidates), settings.ai_match_daily_budget - used_today))
+    )
     profile_brief = _profile_brief(profile, experiences, skills, user_exp_years)
 
     for idx, (job, _rank, v_score, rules) in enumerate(top_candidates):
         match_out: MatchScoreOutput | None = None
         if idx < ai_budget:
-            cache_key = f"match:{user_id}:{job.id}:{profile_version_id or 'none'}"
+            cache_key = f"match:{user_id}:{job.id}:{profile_version_id}"
             cached_data = await redis.get(cache_key)
             if cached_data:
                 match_out = MatchScoreOutput.model_validate(json.loads(cached_data))
@@ -200,6 +213,8 @@ async def run_matching_funnel_for_user(
                         cache_ttl_seconds=86400 * 30,
                     )
                     await redis.set(cache_key, match_out.model_dump_json(), ex=86400 * 30)
+                    await redis.incr(budget_key)
+                    await redis.expire(budget_key, 86400 * 2)
                 except Exception as e:
                     logger.warning("Gemini scoring failed for job %s: %s", job.id, e)
                     ai_budget = idx  # stop calling AI this run (quota/outage); rules take over
