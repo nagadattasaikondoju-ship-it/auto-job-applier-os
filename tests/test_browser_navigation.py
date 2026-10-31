@@ -19,7 +19,14 @@ def _chromium_available() -> bool:
         from playwright.async_api import async_playwright  # noqa: F401
     except ImportError:
         return False
-    return bool(os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")) or os.path.isdir("/opt/pw-browsers")
+    # An explicit binary, a pre-installed image path, or `playwright install`'s default cache
+    return any(
+        (
+            os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE"),
+            os.path.isdir("/opt/pw-browsers"),
+            os.path.isdir(os.path.expanduser("~/.cache/ms-playwright")),
+        )
+    )
 
 
 pytestmark = pytest.mark.skipif(not _chromium_available(), reason="needs Playwright Chromium")
