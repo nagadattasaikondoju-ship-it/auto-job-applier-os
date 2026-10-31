@@ -23,13 +23,32 @@
    `"database":"connected","redis":"connected"`.
 
 Costs: everything runs on Render's free plans; no card is needed. Limits:
-- Free Postgres expires after 30 days: upgrade it (or export your data) before then.
+- Free Postgres expires after 30 days: switch to Neon (section 1b) or upgrade it before then.
 - The free API sleeps after 15 idle minutes. While asleep, scheduled job searches, matching and
   auto-apply pause; the next visit wakes it (~1 minute).
 - The worker shares 512 MB with the API (tested: ~460 MB peak while Chromium submits a form).
 
 For always-on background work, uncomment `applyon-worker` in `render.yaml` (Starter, ~$7/month)
 and set `RUN_WORKER_IN_API=false` on `applyon-api`.
+
+## 1b. Free database that doesn't expire: Neon
+
+Render's free Postgres is deleted after 30 days. [Neon](https://neon.tech)'s free plan doesn't expire
+and supports `pgvector`, which Applyon needs for matching.
+
+1. Sign up at neon.tech (GitHub or Google login) and create a project. Pick the **AWS Asia Pacific
+   (Singapore)** region, closest to Render's Singapore region and to users in India.
+2. On the project dashboard, click **Connect**, turn **Connection pooling off**, and copy the
+   connection string. It looks like
+   `postgresql://user:password@ep-xxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
+   Paste it exactly as shown: Applyon converts `sslmode`/`channel_binding` for its database driver.
+3. On Render, open `applyon-api` → **Environment**, set both `DATABASE_URL` and `DIRECT_DATABASE_URL`
+   to that string, and save. The redeploy creates the tables and the `vector` extension by itself.
+4. Check `…/health/ready` shows `"database":"connected"`.
+
+Data in the old Render database is not copied over. To keep it, run
+`pg_dump --no-owner --no-acl "<old Render external URL>" | psql "<Neon URL>"` before switching.
+Neon's free compute sleeps after a few idle minutes and wakes in well under a second on the next query.
 
 ## 2. Point the website at the API
 

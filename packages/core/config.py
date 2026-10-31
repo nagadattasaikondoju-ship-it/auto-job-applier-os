@@ -4,6 +4,24 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _asyncpg_query(url: str) -> str:
+    """Neon/Supabase URLs end in ?sslmode=require&channel_binding=require, which asyncpg rejects.
+
+    asyncpg takes ssl=<mode> instead and has no channel_binding option, so translate them.
+    """
+    base, _, query = url.partition("?")
+    if not query:
+        return url
+    params = []
+    for pair in query.split("&"):
+        key, _, value = pair.partition("=")
+        if key == "sslmode":
+            params.append(f"ssl={value}")
+        elif key != "channel_binding":
+            params.append(pair)
+    return f"{base}?{'&'.join(params)}" if params else base
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -98,15 +116,17 @@ class Settings(BaseSettings):
         """Hosts hand out postgres:// URLs; the app needs the asyncpg driver."""
         for prefix in ("postgres://", "postgresql://"):
             if v.startswith(prefix):
-                return "postgresql+asyncpg://" + v[len(prefix) :]
-        return v
+                v = "postgresql+asyncpg://" + v[len(prefix) :]
+                break
+        return _asyncpg_query(v) if v.startswith("postgresql+asyncpg://") else v
 
     @field_validator("direct_database_url")
     @classmethod
     def _plain_driver(cls, v: str) -> str:
         if v.startswith("postgres://"):
-            return "postgresql://" + v[len("postgres://") :]
-        return v.replace("postgresql+asyncpg://", "postgresql://", 1)
+            v = "postgresql://" + v[len("postgres://") :]
+        # Migrations connect through asyncpg too (migrations/env.py), so translate sslmode here as well
+        return _asyncpg_query(v.replace("postgresql+asyncpg://", "postgresql://", 1))
 
     @property
     def dev_login_enabled(self) -> bool:

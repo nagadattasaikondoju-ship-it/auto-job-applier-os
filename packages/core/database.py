@@ -12,7 +12,8 @@ from sqlalchemy.pool import NullPool
 from packages.core.config import settings
 
 # Determine if connecting to a transaction pooler (e.g. Supabase port 6543 or explicit flag)
-use_pooler = settings.is_supabase_pooler or ":6543" in settings.database_url
+# Transaction-mode poolers (Supabase on :6543, Neon "-pooler" hosts) can't keep prepared statements
+use_pooler = settings.is_supabase_pooler or ":6543" in settings.database_url or "-pooler." in settings.database_url
 
 connect_args = {}
 engine_kwargs: dict = {
