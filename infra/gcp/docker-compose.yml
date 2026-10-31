@@ -1,0 +1,84 @@
+# Production backend on one Google Compute Engine VM (see docs/DEPLOY.md).
+# Website: Vercel. Database: Neon (DATABASE_URL in .env). Everything else runs here.
+name: applyon
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Celery queues must never be evicted; appendonly keeps queued work across restarts
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # REST API. On start: migrations, company list, then uvicorn (infra/start.sh).
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/Dockerfile
+    image: applyon-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      RUN_WORKER_IN_API: "false"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  # Background work: job search, matching, auto-apply (Chromium) and the scheduler (beat).
+  worker:
+    build:  # same image as the API (cached, so this costs nothing); never pulled from a registry
+      context: ../..
+      dockerfile: infra/Dockerfile
+    image: applyon-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - celery
+      - -A
+      - apps.workers.celery_app.celery_app
+      - worker
+      - --beat
+      - --concurrency=2
+      - --loglevel=info
+      - --queues=job_ingestion,embeddings,ai_matching,document_generation,form_schema,browser_automation,autopilot,notifications,maintenance,priority
+    depends_on:
+      api:
+        condition: service_healthy  # migrations have run
+
+  # HTTPS in front of the API, with a free automatic Let's Encrypt certificate for $API_DOMAIN
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  redis_data:
+  caddy_data:
+  caddy_config:
