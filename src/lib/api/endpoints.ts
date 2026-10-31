@@ -86,7 +86,7 @@ export const api = {
   },
 
   jobs: {
-    feed: (params: { cursor?: string | null; limit?: number; min_match_score?: number | null }) =>
+    feed: (params: { cursor?: string | null; limit?: number; min_match_score?: number | null; matched_only?: boolean }) =>
       apiRequest<JobFeed>("/v1/jobs", { query: params }),
     get: (id: string) => apiRequest<JobDetail>(`/v1/jobs/${id}`),
     import: (url: string, optional_text = "") =>

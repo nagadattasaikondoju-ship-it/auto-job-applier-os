@@ -218,7 +218,7 @@ async def create_profile_snapshot_for_user(session: AsyncSession, user_id: str) 
     prof_stmt = select(Profile).where(Profile.user_id == user_id)
     profile = (await session.execute(prof_stmt)).scalar_one_or_none()
     if not profile:
-        profile = Profile(id=uuid.uuid4(), user_id=user_id, full_name="Candidate")
+        profile = Profile(user_id=user_id, full_name="Candidate", email="")
         session.add(profile)
         await session.flush()
 
@@ -247,3 +247,16 @@ async def create_profile_snapshot_for_user(session: AsyncSession, user_id: str) 
         certifications=certifications,
         skills=skills,
     )
+
+
+async def current_profile_version(session: AsyncSession, user_id: str) -> ProfileVersion:
+    """The user's latest profile snapshot, created on demand (job_matches rows require one)."""
+    version = (
+        await session.execute(
+            select(ProfileVersion)
+            .where(ProfileVersion.user_id == user_id)
+            .order_by(ProfileVersion.version_no.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return version or await create_profile_snapshot_for_user(session, user_id)
