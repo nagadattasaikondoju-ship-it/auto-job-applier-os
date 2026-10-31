@@ -44,6 +44,7 @@ import type {
   ResumeVersionListItem,
   RewriteResult,
   SkillCreate,
+  SubmitMode,
   TailorResult,
   TaskStatus,
   UploadResumeResult,
@@ -179,7 +180,7 @@ export const api = {
   reviewQueue: {
     list: (page = 1) => apiRequest<Paginated<ApplicationDetail>>("/v1/review-queue", { query: { page } }),
     approve: (id: string) =>
-      apiRequest<{ status: string; submission_queued: boolean }>(`/v1/review-queue/applications/${id}/approve`, {
+      apiRequest<{ status: string; submission_queued: boolean; apply_mode?: SubmitMode }>(`/v1/review-queue/applications/${id}/approve`, {
         method: "POST",
       }),
     reject: (id: string) =>

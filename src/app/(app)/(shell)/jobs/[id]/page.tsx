@@ -128,6 +128,11 @@ export default function JobDetailPage() {
               {j.employment_type && <Badge>{humanize(j.employment_type)}</Badge>}
               {experience && <Badge>{experience}</Badge>}
               {j.ats_type && <Badge>via {humanize(j.ats_type)}</Badge>}
+              {j.apply_mode && (
+                <Badge tone={j.apply_mode === "auto" ? "success" : "neutral"}>
+                  {j.apply_mode === "auto" ? "Auto-apply" : "Assisted apply"}
+                </Badge>
+              )}
             </div>
           </div>
 

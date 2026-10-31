@@ -14,6 +14,20 @@ from apps.browser.executor import BrowserAutomationExecutor, is_navigation_timeo
 FORM = b"<html><body><form><input name='name'><button type='submit'>Submit application</button></form></body></html>"
 
 
+def _preinstalled_chromium() -> str | None:
+    """Images that ship Chromium outside Playwright's cache (e.g. /opt/pw-browsers) need an explicit path."""
+    import glob
+
+    found = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))
+    return found[-1] if found else None
+
+
+if not os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE") and (
+    not os.path.isdir(os.path.expanduser("~/.cache/ms-playwright")) and _preinstalled_chromium()
+):
+    os.environ["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] = _preinstalled_chromium() or ""
+
+
 def _chromium_available() -> bool:
     try:
         from playwright.async_api import async_playwright  # noqa: F401
@@ -23,7 +37,6 @@ def _chromium_available() -> bool:
     return any(
         (
             os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE"),
-            os.path.isdir("/opt/pw-browsers"),
             os.path.isdir(os.path.expanduser("~/.cache/ms-playwright")),
         )
     )

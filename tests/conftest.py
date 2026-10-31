@@ -1,3 +1,8 @@
+import os
+
+# Before the app is imported: test settings (dev logins allowed, no connection pooling across event loops)
+os.environ["APP_ENV"] = "test"
+
 from collections.abc import AsyncGenerator
 
 import pytest

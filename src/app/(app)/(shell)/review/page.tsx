@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, ClipboardCheck, ExternalLink, X } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AnswerPlan } from "@/components/app/answer-plan";
@@ -56,6 +57,8 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
   // Only required questions block approval; optional ones can be left blank
   const unresolved = fields.filter((f) => f.required && (f.source === "unresolved" || f.value === null || f.value === "")).length;
   const needsAction = app.status === "needs_user_action";
+  const assisted = app.apply_mode === "assisted";
+  const router = useRouter();
 
   const done = (msg: string) => {
     toast.success(msg);
@@ -65,12 +68,19 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
 
   const approve = useMutation({
     mutationFn: () => api.reviewQueue.approve(app.id),
-    onSuccess: (r) =>
+    onSuccess: (r) => {
+      if (r.apply_mode === "assisted") {
+        // Sites we can't submit to (CAPTCHA, login): go straight to the prepared answers
+        done(`Approved. Your answers for ${app.job.company_name} are ready.`);
+        router.push(`/apply/${app.id}`);
+        return;
+      }
       done(
         r.submission_queued
           ? `Approved. We're submitting your ${app.job.company_name} application.`
           : `Approved. Open the application page with the Applyon extension to submit it.`
-      ),
+      );
+    },
     onError: (e) => toast.error(e.message),
   });
   const reject = useMutation({
@@ -109,6 +119,7 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
                   {unresolved} required question{unresolved === 1 ? "" : "s"} need answers
                 </Badge>
               )}
+              <Badge tone={assisted ? "neutral" : "success"}>{assisted ? "Assisted apply" : "Auto-apply"}</Badge>
               <Badge>Prepared {timeAgo(app.created_at)}</Badge>
             </span>
           </span>
@@ -118,15 +129,22 @@ function ReviewCard({ app, defaultOpen }: { app: ApplicationDetail; defaultOpen:
             <X className="size-3.5" aria-hidden="true" />
             Skip
           </Button>
-          {needsAction && app.application_url ? (
-            <ButtonLink href={app.application_url} external size="sm">
+          {needsAction ? (
+            <ButtonLink href={`/apply/${app.id}`} size="sm">
               <ExternalLink className="size-3.5" aria-hidden="true" />
-              Finish in browser
+              Finish applying
             </ButtonLink>
           ) : (
-            <Button size="sm" variant="accent" onClick={() => approve.mutate()} loading={approve.isPending} disabled={unresolved > 0}>
+            <Button
+              size="sm"
+              variant="accent"
+              onClick={() => approve.mutate()}
+              loading={approve.isPending}
+              // Assisted applications can be approved with gaps: the user answers those on the form
+              disabled={unresolved > 0 && !assisted}
+            >
               <Check className="size-3.5" aria-hidden="true" />
-              Approve
+              {assisted ? "Approve & apply" : "Approve"}
             </Button>
           )}
         </div>
