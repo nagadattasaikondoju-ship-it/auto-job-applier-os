@@ -13,7 +13,6 @@ from packages.core.models.preferences import JobPreference
 from packages.core.models.profile import Profile
 from packages.core.services.matching import run_matching_funnel_for_user
 
-
 ROLE = f"Zyxtronics Analyst {uuid.uuid4().hex[:6]}"  # unique, so other tests' jobs don't match
 
 
@@ -26,7 +25,7 @@ async def _seed(user_id: str, jobs: int) -> None:
         company = Company(name=f"Co {uuid.uuid4().hex[:6]}", normalized_name=uuid.uuid4().hex)
         db.add(company)
         await db.flush()
-        for i in range(jobs):
+        for _ in range(jobs):
             db.add(Job(
                 company_id=company.id, title=ROLE, normalized_title=ROLE.lower(), source="greenhouse",
                 external_id=uuid.uuid4().hex, application_url=f"https://boards.greenhouse.io/x/jobs/{uuid.uuid4().hex}",
