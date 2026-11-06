@@ -12,6 +12,7 @@ from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
 from packages.core.models.applications import Application
 from packages.core.models.jobs import Job
+from packages.core.net_safety import UnsafeUrlError
 from packages.core.services.applications import ApplicationsService
 from packages.core.services.jobs import ingest_normalized_job
 from packages.jobs_sources.detector import detect_ats
@@ -44,7 +45,10 @@ async def get_fill_plan(
 
     if not job:
         # Auto-import job
-        normalized = await ManualUrlImporter().import_url(url=url)
+        try:
+            normalized = await ManualUrlImporter().import_url(url=url)
+        except UnsafeUrlError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
         job, _ = await ingest_normalized_job(session=db, job_in=normalized)
         await db.commit()
 

@@ -2,12 +2,13 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
+from packages.core.config import settings
 from packages.core.seed.plans import PLANS_CONFIG
 from packages.core.services.credits import CreditsService
 
@@ -15,7 +16,7 @@ router = APIRouter(prefix="", tags=["Credits & Billing"])
 
 
 class TopupDemoRequest(BaseModel):
-    amount: int = 10
+    amount: int = Field(default=10, gt=0, le=50)
     credit_type: str = "apply"
     reason: str = "demo_topup"
 
@@ -86,7 +87,13 @@ async def topup_demo_credits(
     user: AuthenticatedUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Top up credits for development/testing without requiring an external payment gateway."""
+    """Top up credits for development/testing without requiring an external payment gateway.
+
+    Free credits must never be available in production: anywhere but development and test this
+    route answers 404, as if it didn't exist.
+    """
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Not Found")
     svc = CreditsService(db)
     entry = await svc.grant_credits(
         user_id=user.user_id,

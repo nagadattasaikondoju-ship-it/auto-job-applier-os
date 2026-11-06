@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
-from packages.core.models.applications import Application
+from packages.core.models.applications import Application, Campaign
 from packages.core.models.matching import CoverLetter, ResumeVersion
 from packages.core.models.platform import AuditLog, Consent
 from packages.core.models.preferences import AnswerBank, QuestionnaireSession
@@ -24,6 +24,7 @@ from packages.core.models.profile import (
     Project,
     Skill,
 )
+from packages.core.services.applications import PRE_SUBMISSION
 
 router = APIRouter(prefix="/privacy", tags=["Privacy & DPDP Compliance"])
 
@@ -205,14 +206,22 @@ async def delete_user_account(
     await db.execute(delete(AnswerBank).where(AnswerBank.user_id == user_id))
     await db.execute(delete(QuestionnaireSession).where(QuestionnaireSession.user_id == user_id))
 
-    # 4. Anonymize applications
+    # 4. Anonymize applications; anything not yet sent is withdrawn so it is never submitted
     await db.execute(
         update(Application)
         .where(Application.user_id == user_id)
         .values(notes="Account deleted by candidate under DPDP Act 2023")
     )
+    await db.execute(
+        update(Application)
+        .where(Application.user_id == user_id, Application.status.in_(PRE_SUBMISSION))
+        .values(status="withdrawn", failure_reason="Account deleted")
+    )
 
-    # 5. Append immutable audit log
+    # 5. Stop autopilot: no more job searches, AI scoring or applications for a deleted account
+    await db.execute(update(Campaign).where(Campaign.user_id == user_id).values(status="stopped"))
+
+    # 6. Append immutable audit log
     audit = AuditLog(
         actor=user_id,
         action="dpdp_account_deletion",

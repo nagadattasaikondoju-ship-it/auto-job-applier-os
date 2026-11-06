@@ -13,6 +13,7 @@ from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
 from packages.core.models.jobs import Company, Job
 from packages.core.models.matching import JobMatch
+from packages.core.net_safety import UnsafeUrlError
 from packages.core.services.apply_mode import apply_mode
 from packages.core.services.jobs import get_jobs_feed, ingest_normalized_job
 from packages.core.services.profile import current_profile_version
@@ -147,7 +148,10 @@ async def import_job_from_url(
 ) -> dict[str, Any]:
     """Import and normalize any job URL (Greenhouse, Lever, Ashby, or career page)."""
     importer = ManualUrlImporter()
-    normalized = await importer.import_url(url=req.url, optional_text=req.optional_text)
+    try:
+        normalized = await importer.import_url(url=req.url, optional_text=req.optional_text)
+    except UnsafeUrlError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
 
     job, is_new = await ingest_normalized_job(session=session, job_in=normalized)
     await session.commit()

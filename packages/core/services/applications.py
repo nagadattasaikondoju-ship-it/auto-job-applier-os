@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.core.models.applications import Application, ApplicationEvent
@@ -38,6 +38,36 @@ VALID_STATUSES = {
     "rejected",
     "ghosted",
 }
+
+# Statuses before anything was sent to the employer
+PRE_SUBMISSION = {"draft", "preparing", "ready_for_review", "approved", "needs_user_action", "failed"}
+# Outcomes that only make sense once the application was actually sent
+POST_SUBMISSION = {"interview", "offer", "rejected", "ghosted"}
+# What the candidate may approve for submission (a failed or blocked run can be approved again)
+APPROVABLE = ("ready_for_review", "needs_user_action", "failed")
+
+
+def user_transition_error(app: Application, new_status: str) -> str | None:
+    """Why a candidate can't move this application to new_status, or None if they can.
+
+    Pipeline statuses (preparing, approved, submitting, ...) are set by Applyon, never by hand.
+    A candidate can record that they applied themselves, withdraw, and track outcomes of a
+    submitted application.
+    """
+    old = app.status
+    if new_status == old:
+        return None
+    if old == "submitting":
+        return "This application is being submitted right now. Wait for it to finish."
+    if new_status == "withdrawn":
+        return None
+    if new_status == "submitted":
+        return None if old in PRE_SUBMISSION or old in POST_SUBMISSION else f"Can't mark a {old} application as submitted."
+    if new_status in POST_SUBMISSION:
+        if app.submitted_at is None and old not in POST_SUBMISSION and old != "submitted":
+            return "Mark this application as submitted first, then record the outcome."
+        return None
+    return f"Applyon sets “{new_status.replace('_', ' ')}” itself; it can't be chosen by hand."
 
 
 class ApplicationsService:
@@ -271,18 +301,27 @@ class ApplicationsService:
         actor: str = "user",
         notes: str | None = None,
         failure_reason: str | None = None,
+        enforce_user_rules: bool = False,
     ) -> Application:
-        """Update application status with audit event."""
+        """Update application status with audit event.
+
+        enforce_user_rules: the change comes from the candidate editing their tracker, so only
+        transitions that make sense are allowed (see user_transition_error); others get 409.
+        """
         if new_status not in VALID_STATUSES:
             raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
 
         stmt = select(Application).where(
             Application.id == application_id, Application.user_id == user_id
-        )
+        ).with_for_update()
         res = await self.db.execute(stmt)
         app_obj = res.scalars().first()
         if not app_obj:
             raise HTTPException(status_code=404, detail="Application not found")
+        if enforce_user_rules:
+            problem = user_transition_error(app_obj, new_status)
+            if problem:
+                raise HTTPException(status_code=409, detail=problem)
 
         old_status = app_obj.status
         app_obj.status = new_status
@@ -305,6 +344,50 @@ class ApplicationsService:
             created_at=datetime.now(UTC),
         )
         self.db.add(event)
+        await self.db.flush()
+        return app_obj
+
+    async def approve_for_submission(self, user_id: str, application_id: uuid.UUID) -> Application:
+        """Atomically move an application to approved, exactly once.
+
+        A conditional UPDATE means two simultaneous approvals (double-click, two tabs, a retried
+        request) can't both win, so the browser submission is enqueued at most once.
+        """
+        claimed = (
+            await self.db.execute(
+                update(Application)
+                .where(
+                    Application.id == application_id,
+                    Application.user_id == user_id,
+                    Application.status.in_(APPROVABLE),
+                )
+                .values(status="approved", failure_reason=None)
+                .returning(Application.id)
+            )
+        ).first()
+        app_obj = (
+            await self.db.execute(
+                select(Application).where(Application.id == application_id, Application.user_id == user_id)
+            )
+        ).scalars().first()
+        if not app_obj:
+            raise HTTPException(status_code=404, detail="Application not found")
+        if not claimed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This application is already {app_obj.status.replace('_', ' ')}, so it wasn't approved again.",
+            )
+        await self.db.refresh(app_obj)
+        self.db.add(
+            ApplicationEvent(
+                id=uuid.uuid4(),
+                application_id=app_obj.id,
+                type="status_changed",
+                payload={"to": "approved", "notes": "Candidate approved application in review queue"},
+                actor="user",
+                created_at=datetime.now(UTC),
+            )
+        )
         await self.db.flush()
         return app_obj
 

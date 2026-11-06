@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from apps.browser.executor import BrowserAutomationExecutor
 from apps.workers.celery_app import celery_app
@@ -31,6 +31,22 @@ async def _async_execute_browser_application(
     app_uuid = uuid.UUID(application_id_str)
 
     async with async_session_maker() as session:
+        if not dry_run:
+            # Claim the application before touching the employer's site: only one run can move it
+            # from approved to submitting, so a duplicate task or a second approval never submits twice.
+            claimed = (
+                await session.execute(
+                    update(Application)
+                    .where(Application.id == app_uuid, Application.status == "approved")
+                    .values(status="submitting")
+                    .returning(Application.id)
+                )
+            ).first()
+            await session.commit()
+            if not claimed:
+                logger.warning("Skipping submission for %s: not in approved state (already claimed or changed)", app_uuid)
+                return {"skipped": True, "reason": "not_approved", "application_id": application_id_str}
+
         res = await session.execute(select(Application).where(Application.id == app_uuid))
         application = res.scalar_one_or_none()
         if not application:
@@ -47,14 +63,22 @@ async def _async_execute_browser_application(
         resume_path = await _write_resume_pdf(session, application.user_id, application.resume_version_id)
 
         executor = BrowserAutomationExecutor()
-        auto_result = await executor.execute_application(
-            application_id=application.id,
-            application_url=application.application_url or job.application_url,
-            ats_type=job.ats_type or "generic",
-            fields=resolved_fields,
-            resume_path=resume_path,
-            dry_run=dry_run,
-        )
+        try:
+            auto_result = await executor.execute_application(
+                application_id=application.id,
+                application_url=application.application_url or job.application_url,
+                ats_type=job.ats_type or "generic",
+                fields=resolved_fields,
+                resume_path=resume_path,
+                dry_run=dry_run,
+            )
+        except Exception as e:
+            # Never leave an application stuck in "submitting"
+            logger.exception("Browser submission crashed for %s", application.id)
+            application.status = "failed"
+            application.failure_reason = f"The submission stopped unexpectedly ({type(e).__name__}). Nothing was confirmed as sent; check the employer's site before retrying."
+            await session.commit()
+            raise
 
         # Handle outcomes adhering to Section 0 & financial ledger safety
         credits_svc = CreditsService(session)
