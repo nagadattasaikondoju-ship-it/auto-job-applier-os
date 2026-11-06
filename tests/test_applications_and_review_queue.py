@@ -319,8 +319,12 @@ async def test_applications_api_endpoints():
             patch(
                 "packages.core.services.applications.ApplicationsService.get_application_detail",
                 new_callable=AsyncMock,
-                return_value={"apply_mode": "auto", "apply_ats": "greenhouse", "application_url": None},
+                return_value={"apply_mode": "auto", "apply_ats": "greenhouse", "application_url": None, "status": "ready_for_review"},
             ),
+            patch(
+                "packages.core.services.applications.ApplicationsService.approve_for_submission",
+                new_callable=AsyncMock,
+            ) as mock_approve,
             patch("apps.workers.dispatch.enqueue_browser_submission", return_value=False),
         ):
             mock_app = MagicMock()
@@ -356,6 +360,7 @@ async def test_applications_api_endpoints():
                 "page_size": 20,
             }
             mock_update.return_value = mock_app
+            mock_approve.return_value = mock_app
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 # 1. Create application

@@ -145,6 +145,7 @@ async def update_application_status(
         actor="user",
         notes=body.notes,
         failure_reason=body.failure_reason,
+        enforce_user_rules=True,
     )
     return {"id": str(app_obj.id), "status": app_obj.status}
 
@@ -163,6 +164,7 @@ async def withdraw_application(
         new_status="withdrawn",
         actor="user",
         notes="Withdrawn by candidate",
+        enforce_user_rules=True,
     )
 
 

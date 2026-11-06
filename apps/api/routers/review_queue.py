@@ -3,13 +3,13 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.deps.auth import AuthenticatedUser, get_current_user
 from apps.api.deps.db import get_db
-from packages.core.services.applications import ApplicationsService
+from packages.core.services.applications import APPROVABLE, ApplicationsService
 from packages.core.services.apply_mode import assisted_reason
 
 router = APIRouter(prefix="/review-queue", tags=["Review Queue"])
@@ -68,6 +68,11 @@ async def approve_application(
     """
     svc = ApplicationsService(db)
     detail = await svc.get_application_detail(user_id=user.user_id, application_id=application_id)
+    if detail["status"] not in APPROVABLE:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This application is already {str(detail['status']).replace('_', ' ')}, so it wasn't approved again.",
+        )
     if detail["apply_mode"] == "assisted":
         reason = assisted_reason(detail["apply_ats"], detail["application_url"])
         app_obj = await svc.update_status(
@@ -85,13 +90,9 @@ async def approve_application(
             "submission_queued": False,
             "apply_mode": "assisted",
         }
-    app_obj = await svc.update_status(
-        user_id=user.user_id,
-        application_id=application_id,
-        new_status="approved",
-        actor="user",
-        notes="Candidate approved application in review queue",
-    )
+    # Atomic: of two simultaneous approvals only one gets here, the other gets 409
+    app_obj = await svc.approve_for_submission(user_id=user.user_id, application_id=application_id)
+    await db.commit()
     # Approved applications go to a browser worker for submission. Without workers running,
     # they stay "approved" and the user can finish them with the Chrome extension.
     from apps.workers.dispatch import enqueue_browser_submission
@@ -120,6 +121,7 @@ async def reject_application(
         new_status="withdrawn",
         actor="user",
         notes="Candidate rejected from review queue",
+        enforce_user_rules=True,
     )
     return {"id": str(app_obj.id), "status": app_obj.status, "rejected": True}
 

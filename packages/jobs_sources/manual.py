@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from packages.core.net_safety import UnsafeUrlError, ensure_public_url, safe_get
 from packages.jobs_sources.base import JobIn, RawJob
 from packages.jobs_sources.detector import detect_ats
 from packages.jobs_sources.greenhouse import GreenhouseBoardConnector
@@ -31,7 +32,11 @@ class ManualUrlImporter:
     """Imports and normalizes a single job from any valid URL."""
 
     async def import_url(self, url: str, optional_text: str = "") -> JobIn:
-        """Fetch, detect ATS, and extract full structured job details."""
+        """Fetch, detect ATS, and extract full structured job details.
+
+        Raises UnsafeUrlError for anything but a public web address (SSRF protection).
+        """
+        url = await ensure_public_url(url)
         ats_type = detect_ats(url)
         parsed = urlparse(url)
         path_parts = [p for p in parsed.path.split("/") if p]
@@ -95,9 +100,9 @@ class ManualUrlImporter:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
             async with httpx.AsyncClient(
-                timeout=25.0, headers=headers, follow_redirects=True
+                timeout=25.0, headers=headers, follow_redirects=False
             ) as client:
-                resp = await client.get(url)
+                resp = await safe_get(client, url)
                 if resp.status_code == 200:
                     html_content = resp.text
 
@@ -165,6 +170,8 @@ class ManualUrlImporter:
                             description_text = re.sub(r"<[^>]+>", " ", cleaned_body)
                             description_text = re.sub(r"\s+", " ", description_text).strip()[:4000]
 
+        except UnsafeUrlError:
+            raise  # a redirect pointed somewhere private: refuse the import instead of saving a stub
         except Exception as e:
             logger.warning("Error fetching manual URL %s: %s", url, e)
 
